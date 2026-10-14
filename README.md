@@ -1,5 +1,9 @@
 # BATE BATE — Battle royale de carrinhos
 
+**Jogar online:** https://fantinn.github.io/Bumper-Royale/
+
+O GitHub Pages publica os arquivos da raiz da branch `main`. Novos pushes nessa branch atualizam o jogo automaticamente após a publicação terminar.
+
 Abra **index.html** no Chrome, Edge ou Firefox com WebGL habilitado. Não há build, instalação nem dependências locais. É necessária conexão à internet para carregar Three.js pelo CDN; as fontes têm alternativas locais.
 
 ## Jogar
