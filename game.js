@@ -6,7 +6,7 @@
   if (!window.THREE) { fail('Não foi possível carregar o Three.js. Conecte-se à internet e recarregue a página.'); return; }
   const { CONFIG, createWorld, step } = BumperPhysics;
   const T = THREE, scene = new T.Scene();
-  scene.background = new T.Color('#b8d4dd'); scene.fog = new T.Fog('#b8d4dd', 80, 200);
+  scene.background = new T.Color('#172532'); scene.fog = new T.Fog('#172532', 65, 150);
   let renderer;
   try { renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); }
   catch (_) { fail('Este navegador não conseguiu iniciar o WebGL. Ative a aceleração de hardware e recarregue.'); return; }
@@ -15,8 +15,8 @@
   renderer.outputColorSpace = T.SRGBColorSpace; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.2;
   $('view').appendChild(renderer.domElement);
   const camera = new T.PerspectiveCamera(46, innerWidth / innerHeight, .1, 260);
-  scene.add(new T.HemisphereLight('#f5fbff', '#8c78a6', 2.7));
-  const sun = new T.DirectionalLight('#fff1d1', 3.4); sun.position.set(-20, 45, 15); sun.castShadow = true;
+  scene.add(new T.HemisphereLight('#d5e6ed', '#4d3c51', 1.8));
+  const sun = new T.DirectionalLight('#ffe2b2', 2.1); sun.position.set(-20, 35, 15); sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -35, right: 35, top: 35, bottom: -35, near: 1, far: 100 }); sun.shadow.normalBias = .04; scene.add(sun);
   const materials = new Map();
   function mat(color, extra = {}) { const key = color + JSON.stringify(extra); if (!materials.has(key)) materials.set(key, new T.MeshStandardMaterial({ color, roughness: .65, ...extra })); return materials.get(key); }
@@ -24,6 +24,8 @@
   function box(parent, size, color, x, y, z) { return mesh(new T.BoxGeometry(...size), mat(color), parent, x, y, z); }
   function cylinder(parent, rt, rb, height, color, x, y, z, sides = 16) { return mesh(new T.CylinderGeometry(rt, rb, height, sides), mat(color), parent, x, y, z); }
   const arena = new T.Group(); scene.add(arena);
+  const ceilingHeight = BumperPavilion.ceilingHeight;
+  BumperPavilion.build(T, scene, { mesh, box, cylinder, mat }, CONFIG.radius);
   let rings = [], centerIsland, carModels = new Map(), particles = [], world, mode = 'menu', paused = false, accumulator = 0, lastTime = 0, shake = 0, endTimer = 0, audioContext = null, sound = false;
   const palette = ['#dfff72', '#ff795e', '#8271e8', '#56d5de', '#ffbd59', '#ef87bf', '#f1efe6', '#5292ef', '#b1e565', '#d8614e', '#94a3ff', '#5ac5a3'];
   // Dispose per-match geometry and textures, while retaining shared materials.
@@ -39,14 +41,14 @@
     for (const child of [...arena.children]) disposeTree(child);
     rings = []; centerIsland = new T.Group(); arena.add(centerIsland);
     const centerRadius = CONFIG.radius - CONFIG.phases * CONFIG.ringWidth;
-    cylinder(centerIsland, centerRadius, Math.max(.1, centerRadius - .5), 1.15, '#8971c9', 0, -.575, 0, 64);
+    cylinder(centerIsland, centerRadius, Math.max(.1, centerRadius - .5), 1.15, '#577475', 0, -.575, 0, 64);
     for (let ring = 0; ring < CONFIG.phases; ring++) {
       const outer = CONFIG.radius - ring * CONFIG.ringWidth, inner = outer - CONFIG.ringWidth;
       const group = new T.Group(); arena.add(group);
       for (let n = 0; n < 32; n++) {
         const a = n / 32 * Math.PI * 2, b = (n + 1) / 32 * Math.PI * 2;
-        const color = ring === 0 ? (n % 2 ? '#ff936c' : '#ffe0a0') : (ring % 2 ? '#646fa7' : '#737fb3');
-        const tile = mesh(wedge(inner + .035, outer - .035, a + .003, b - .003), mat(color), group);
+        const color = ring === 0 ? (n % 2 ? '#e8b865' : '#384347') : (ring % 2 ? '#667b80' : '#75888a');
+        const tile = mesh(wedge(inner + .035, outer - .035, a + .001, b - .001), mat(color, { metalness: .55, roughness: .38 }), group);
         tile.userData.original = tile.material;
         if (ring > 0 && n % 2 === 0) {
           const stripe = box(group, [.12, .025, 1], '#a6b3d1', Math.cos(a) * (outer - .65), .025, Math.sin(a) * (outer - .65)); stripe.rotation.y = -a + Math.PI / 2;
@@ -78,18 +80,16 @@
     box(body, [.4, .12, .05], '#25314b', 0, 2, .18);
     const wheel = mesh(new T.TorusGeometry(.22, .045, 5, 12), mat('#26354c'), body, 0, 1.34, .41); wheel.rotation.x = -.6;
     for (const x of [-.5, .5]) box(body, [.25, .13, .07], '#fff2cb', x, .91, .94);
-    cylinder(body, .025, .025, 1.6, '#e4e9ee', -.63, 1.7, -.6, 6);
-    mesh(new T.SphereGeometry(.095, 8, 6), mat(color, { emissive: color, emissiveIntensity: .5 }), body, -.63, 2.54, -.6);
+    cylinder(body, .13, .17, .45, '#242e39', -.63, 1.27, -.6, 8);
+    // The collector is separate from body roll: its shoe stays on the ceiling plane.
+    const collector = new T.Group(); group.add(collector);
+    const poles = Array.from({ length: 3 }, () => mesh(new T.CylinderGeometry(.035, .045, 1, 6), mat('#b6c4ce', { metalness: .85, roughness: .22 }), collector));
+    const shoe = box(collector, [.5, .065, .3], '#e1c291', 0, ceilingHeight - .035, 0);
+    const contact = mesh(new T.SphereGeometry(.075, 8, 6), mat('#fff4cd', { emissive: '#bdeaff', emissiveIntensity: 5 }), collector);
+    contact.castShadow = false;
     group.add(label(car.name, car.id === 0 ? '#dfff72' : '#ffffff'));
     if (car.id === 0) { const ring = mesh(new T.RingGeometry(1.25, 1.34, 40), new T.MeshBasicMaterial({ color: '#e4ff88', side: T.DoubleSide }), group, 0, .04, 0); ring.rotation.x = -Math.PI / 2; }
-    carModels.set(car.id, { group, body });
-  }
-  // Small low-poly cloud islands provide depth without any downloaded assets.
-  for (let i = 0; i < 30; i++) {
-    const cloud = new T.Group(), angle = i * 2.399;
-    cloud.position.set(Math.cos(angle) * (40 + i % 5 * 14), -10 - i % 4 * 5, Math.sin(angle) * (40 + i % 5 * 14));
-    for (let j = 0; j < 4; j++) { const puff = mesh(new T.IcosahedronGeometry(3 + j % 2, 1), mat('#e3edf0'), cloud, j * 3 - 4, Math.sin(j) * 1.2, 0); puff.scale.set(1.5, .65, 1); puff.castShadow = false; }
-    scene.add(cloud);
+    carModels.set(car.id, { group, body, poles, shoe, contact, sparkTime: car.id * .017 });
   }
   function prepare(options = {}) {
     for (const model of carModels.values()) disposeTree(model.group); carModels.clear();
@@ -100,7 +100,7 @@
   function start() {
     prepare({ bots: Number($('bots').value), difficulty: $('difficulty').value }); mode = 'playing';
     $('menu').hidden = true; $('sceneLabel').hidden = true; $('hud').hidden = false; keys.clear();
-    const s = world.cars[0].state; camera.position.set(s.x - Math.sin(s.angle) * 15, 12, s.z - Math.cos(s.angle) * 15); camera.lookAt(s.x, 0, s.z);
+    const s = world.cars[0].state; camera.position.set(s.x - Math.sin(s.angle) * 14, 6, s.z - Math.cos(s.angle) * 14); camera.lookAt(s.x, 3.5, s.z);
     if (sound) initAudio();
   }
   const keys = new Set();
@@ -124,11 +124,12 @@
     gain.gain.setValueAtTime(volume, now); gain.gain.exponentialRampToValueAtTime(.001, now + duration);
     oscillator.connect(gain); gain.connect(audioContext.destination); oscillator.start(); oscillator.stop(now + duration);
   }
-  function burst(x, z, count, color, y = .8) {
+  function burst(x, z, count, color, y = .8, electric = false) {
     for (let i = 0; i < count && particles.length < 250; i++) {
       const p = mesh(new T.BoxGeometry(.13, .13, .13), mat(color, { emissive: color, emissiveIntensity: .5 }), scene, x, y, z);
       p.castShadow = false; const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 5;
-      particles.push({ mesh: p, vx: Math.sin(a) * v, vz: Math.cos(a) * v, vy: 2 + Math.random() * 5, life: .4 + Math.random() * .5 });
+      if (electric) p.scale.set(.4, 1.8, .4);
+      particles.push({ mesh: p, vx: Math.sin(a) * v, vz: Math.cos(a) * v, vy: electric ? -1 - Math.random() * 2 : 2 + Math.random() * 5, life: electric ? .15 + Math.random() * .22 : .4 + Math.random() * .5, electric });
     }
   }
   function events() {
@@ -164,12 +165,36 @@
     $('boostText').textContent = cooldown > 0 ? cooldown.toFixed(1) + 's' : 'PRONTO';
   }
   const desiredCamera = new T.Vector3(), lookTarget = new T.Vector3();
+  const poleStart = new T.Vector3(), poleEnd = new T.Vector3(), poleDirection = new T.Vector3(), up = new T.Vector3(0, 1, 0);
+  let visualTime = 0;
   function render(dt, now) {
+    visualTime += dt;
     for (const car of world.cars) {
       const s = car.state, model = carModels.get(car.id);
       model.group.position.set(s.x, s.y, s.z); model.body.rotation.y = s.angle;
       model.body.rotation.z = s.alive ? -car.input.steer * Math.min(.06, Math.hypot(s.vx, s.vz) * .004) : s.y * .09;
       model.group.visible = s.y > -55;
+      const speed = Math.hypot(s.vx, s.vz);
+      const bx = -.63 * Math.cos(s.angle) - .6 * Math.sin(s.angle), bz = .63 * Math.sin(s.angle) - .6 * Math.cos(s.angle);
+      const tx = bx - s.vx * .035, tz = bz - s.vz * .035;
+      const top = ceilingHeight - (s.alive ? s.y : 0) - .045;
+      for (let j = 0; j < model.poles.length; j++) {
+        const a = j / 3, b = (j + 1) / 3;
+        const bend = s.alive ? Math.sin(visualTime * 21 + car.id) * Math.min(.08, speed * .006) : 0;
+        poleStart.set(bx + (tx - bx) * a + Math.sin(a * Math.PI) * bend, 1.4 + (top - 1.4) * a, bz + (tz - bz) * a);
+        poleEnd.set(bx + (tx - bx) * b + Math.sin(b * Math.PI) * bend, 1.4 + (top - 1.4) * b, bz + (tz - bz) * b);
+        const pole = model.poles[j]; pole.position.copy(poleStart).add(poleEnd).multiplyScalar(.5);
+        poleDirection.copy(poleEnd).sub(poleStart); pole.scale.y = poleDirection.length(); pole.quaternion.setFromUnitVectors(up, poleDirection.normalize());
+      }
+      model.shoe.position.set(tx, top, tz); model.shoe.rotation.y = s.angle;
+      model.contact.position.set(tx, top - .04, tz);
+      const moving = mode === 'menu' || (mode === 'playing' && speed > .6);
+      model.contact.visible = s.alive && moving;
+      model.contact.scale.setScalar(.7 + .6 * Math.sin(visualTime * 39 + car.id) ** 2);
+      if (s.alive && moving && dt > 0) {
+        model.sparkTime -= dt;
+        if (model.sparkTime <= 0) { burst(s.x + tx, s.z + tz, s.boostTime > 0 ? 5 : 2, car.id % 2 ? '#ffe4a1' : '#d1f2ff', ceilingHeight - .1, true); model.sparkTime = mode === 'menu' ? .5 : .11 + Math.random() * .14; }
+      }
     }
     for (const ring of rings) {
       const dropping = ring.index < world.phase;
@@ -186,17 +211,17 @@
     centerIsland.scale.set(scale, 1, scale);
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i]; p.life -= dt; p.vy -= 14 * dt;
-      p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt; p.mesh.rotation.x += dt * 6; p.mesh.scale.setScalar(Math.max(.01, Math.min(1, p.life * 3)));
+      p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt; p.mesh.rotation.x += dt * 6;
+      const fade = Math.max(.01, Math.min(1, p.life * (p.electric ? 7 : 3))); p.mesh.scale.set(fade * (p.electric ? .4 : 1), fade * (p.electric ? 1.8 : 1), fade * (p.electric ? .4 : 1));
       if (p.life <= 0) { scene.remove(p.mesh); p.mesh.geometry.dispose(); particles.splice(i, 1); }
     }
     if (mode === 'menu') {
-      camera.position.set(39, 48, 48); camera.lookAt(innerWidth > 700 ? -12 : -4, 0, 0);
-      for (const car of world.cars) { const model = carModels.get(car.id); model.group.position.y = Math.sin(now * 2 + car.id) * .04; }
+      camera.position.set(10, 6.8, 28); camera.lookAt(innerWidth > 700 ? -10 : 0, 3.7, -6);
     } else if (mode === 'playing') {
       const s = world.cars[0].state;
-      desiredCamera.set(s.x - Math.sin(s.angle) * 13, 10.5, s.z - Math.cos(s.angle) * 13);
+      desiredCamera.set(s.x - Math.sin(s.angle) * 14, 6, s.z - Math.cos(s.angle) * 14);
       camera.position.lerp(desiredCamera, 1 - Math.exp(-3.3 * dt));
-      lookTarget.set(s.x + Math.sin(s.angle) * 3, .5, s.z + Math.cos(s.angle) * 3);
+      lookTarget.set(s.x + Math.sin(s.angle) * 3, 3.5, s.z + Math.cos(s.angle) * 3);
       camera.lookAt(lookTarget); shake *= Math.exp(-7 * dt);
       if (shake > .005 && !paused) { camera.position.x += (Math.random() - .5) * shake; camera.position.y += (Math.random() - .5) * shake; }
     }

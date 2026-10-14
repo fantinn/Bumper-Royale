@@ -4,6 +4,8 @@ Abra **index.html** no Chrome, Edge ou Firefox com WebGL habilitado. Não há bu
 
 ## Jogar
 
+O mapa **Parque do Bairro** é um pavilhão de bate-bate com piso metálico, malha condutora no teto, bandeirinhas, bilheteria, bancos e espectadores. Cada carrinho tem uma haste coletora flexível: a sapata desliza no teto e solta faíscas ao dirigir, com rajadas maiores no boost. Ao cair, o carrinho perde contato e para de produzir faíscas. Os anéis da pista continuam cedendo sobre um fosso de manutenção para preservar o battle royale.
+
 Escolha a quantidade de bots e a dificuldade no menu e clique em **Jogar agora**.
 
 - W / seta para cima: acelerar.
@@ -29,6 +31,7 @@ Ao alterar a geometria, mantenha `radius - phases * ringWidth > 0`: essa diferen
 - **physics.js**: configuração, entidades, estado, física, colisões, fases e vitória; sem DOM/Three.js.
 - **ai.js**: decisões dos bots; gera `{ throttle, steer, boost }`, assim como o teclado.
 - **game.js**: Three.js, câmera, partículas, áudio, entrada e interface.
+- **pavilion.js**: cenário do parque e altura do teto (`ceilingHeight`); construído apenas uma vez, sem afetar a física.
 
 Cada entidade tem `id`, `input`, `state` e dados opcionais de IA. A simulação avança em passos fixos de 1/60 s. Para multiplayer futuro, execute a simulação em um servidor autoritativo, receba inputs validados por ID e replique snapshots aos clientes. A camada visual já está separada, mas rede, sincronização, previsão e lobby ainda precisam ser implementados. Esta versão é local: um jogador e bots.
 
