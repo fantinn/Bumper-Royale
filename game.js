@@ -25,7 +25,8 @@
   function cylinder(parent, rt, rb, height, color, x, y, z, sides = 16) { return mesh(new T.CylinderGeometry(rt, rb, height, sides), mat(color), parent, x, y, z); }
   const arena = new T.Group(); scene.add(arena);
   const ceilingHeight = BumperPavilion.ceilingHeight;
-  BumperPavilion.build(T, scene, { mesh, box, cylinder, mat }, CONFIG.radius);
+  const pavilion = BumperPavilion.build(T, scene, { mesh, box, cylinder, mat }, CONFIG.radius);
+  const cameraRay = new T.Raycaster(), cameraSight = new T.Vector3(), cameraObstacles = [];
   let rings = [], centerIsland, carModels = new Map(), particles = [], world, mode = 'menu', paused = false, accumulator = 0, lastTime = 0, shake = 0, endTimer = 0, audioContext = null, sound = false;
   const palette = ['#dfff72', '#ff795e', '#8271e8', '#56d5de', '#ffbd59', '#ef87bf', '#f1efe6', '#5292ef', '#b1e565', '#d8614e', '#94a3ff', '#5ac5a3'];
   // Dispose per-match geometry and textures, while retaining shared materials.
@@ -224,6 +225,19 @@
       lookTarget.set(s.x + Math.sin(s.angle) * 3, 3.5, s.z + Math.cos(s.angle) * 3);
       camera.lookAt(lookTarget); shake *= Math.exp(-7 * dt);
       if (shake > .005 && !paused) { camera.position.x += (Math.random() - .5) * shake; camera.position.y += (Math.random() - .5) * shake; }
+    }
+    // Hide scenery between the camera and the player, especially perimeter posts.
+    // Restore it every frame so columns reappear as soon as the camera clears them.
+    for (const obstacle of cameraObstacles) obstacle.visible = true;
+    cameraObstacles.length = 0;
+    if (mode === 'playing') {
+      const s = world.cars[0].state;
+      cameraSight.set(s.x, Math.max(0, s.y) + 1.2, s.z).sub(camera.position);
+      cameraRay.far = cameraSight.length(); cameraRay.set(camera.position, cameraSight.normalize());
+      pavilion.updateMatrixWorld(true);
+      for (const hit of cameraRay.intersectObjects(pavilion.children, true)) {
+        if (hit.object.isMesh && hit.object.visible) { hit.object.visible = false; cameraObstacles.push(hit.object); }
+      }
     }
     renderer.render(scene, camera);
   }
