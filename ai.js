@@ -18,7 +18,7 @@
       ai.target = target.id;
       const t = target.state, r = Math.hypot(s.x, s.z);
       const safeRadius = world.radius - (world.warning ? c.ringWidth : 0);
-      const projected = Math.hypot(s.x + s.vx * .65, s.z + s.vz * .65);
+      const projected = Math.hypot(s.x + s.vx * .45, s.z + s.vz * .45);
       const retreat = r > safeRadius - 2.5 || projected > safeRadius - 1.6;
       let tx = 0, tz = 0;
       if (!retreat) {
@@ -34,7 +34,7 @@
       car.input = {
         steer: Math.max(-1, Math.min(1, delta * 1.9)),
         throttle: Math.abs(delta) > 1.6 ? (retreat ? -.7 : .15) : (retreat ? .9 : .65 + ai.aggression * .35),
-        boost: !retreat && aligned && nearest > 3 && nearest < 9 && r < safeRadius - 6 && ai.aggression > .48
+        boost: !retreat && aligned && nearest > 2.2 && nearest < 8 && r < safeRadius - (ai.aggression > .75 ? 3.5 : 5) && ai.aggression > .42 && s.knockback <= 0
       };
     }
   }

@@ -8,6 +8,8 @@
     carRadius: 1.05, mass: 1, acceleration: 22, reverseAcceleration: 12, brakeAcceleration: 32,
     maxSpeed: 14, turnSpeed: 2.8, steeringResponse: 14, drag: .8, grip: 4.2,
     restitution: .88, boostImpulse: 12, boostCooldown: 3, boostDuration: .42,
+    impactMultiplier: 1.6, boostImpactMultiplier: 1.3, impactThreshold: 3,
+    knockbackDuration: .7, knockbackGrip: .12, knockbackControl: .25, maxCollisionImpulse: 30,
     finalSeconds: 18,
     difficultyProfiles: { easy: { power: .74, reaction: .48 }, normal: { power: .94, reaction: .23 }, hard: { power: 1.08, reaction: .12 } }
   };
@@ -20,7 +22,7 @@
       const r = config.radius * (i % 2 ? .66 : .77);
       world.cars.push({ id: i, name: i === 0 ? 'VOCÊ' : String(i).padStart(2, '0'),
         input: { throttle: 0, steer: 0, boost: false },
-        state: { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, angle: a + Math.PI, steering: 0, y: 0, vy: 0, alive: true, cooldown: 0, boostTime: 0, mass: config.mass * (i ? .92 + random() * .16 : 1) },
+        state: { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, angle: a + Math.PI, steering: 0, y: 0, vy: 0, alive: true, cooldown: 0, boostTime: 0, knockback: 0, mass: config.mass * (i ? .92 + random() * .16 : 1) },
         ai: i ? { aggression: .3 + random() * .7, nextThink: 0, target: null } : null });
     }
     return world;
@@ -39,6 +41,11 @@
       const s = car.state, input = car.input;
       if (!s.alive) { s.vy -= 24 * dt; s.y += s.vy * dt; s.x += s.vx * dt; s.z += s.vz * dt; continue; }
       s.cooldown = Math.max(0, s.cooldown - dt); s.boostTime = Math.max(0, s.boostTime - dt);
+      s.knockback = Math.max(0, s.knockback - dt);
+      // Strong impacts temporarily loosen traction; steering remains available.
+      const recovery = c.knockbackDuration > 0 ? Math.min(1, s.knockback / (c.knockbackDuration * .5)) : 0;
+      const traction = 1 - recovery * (1 - c.knockbackGrip);
+      const control = 1 - recovery * (1 - c.knockbackControl);
       const speed = Math.hypot(s.vx, s.vz);
       s.steering += (clamp(input.steer, -1, 1) - s.steering) * (1 - Math.exp(-c.steeringResponse * dt));
       s.angle += s.steering * c.turnSpeed * (.6 + .4 * Math.min(1, speed / 5)) * dt;
@@ -53,13 +60,13 @@
       const forwardSpeed = s.vx * fx + s.vz * fz;
       const braking = throttle * forwardSpeed < 0;
       const accel = (braking ? c.brakeAcceleration : throttle >= 0 ? c.acceleration : c.reverseAcceleration) * power;
-      s.vx += fx * throttle * accel * dt; s.vz += fz * throttle * accel * dt;
+      s.vx += fx * throttle * accel * control * dt; s.vz += fz * throttle * accel * control * dt;
       // Remove lateral velocity gradually: grip with a small, readable arcade drift.
       const side = s.vx * fz - s.vz * fx;
-      s.vx -= fz * side * Math.min(1, c.grip * dt); s.vz += fx * side * Math.min(1, c.grip * dt);
-      const drag = Math.exp(-c.drag * dt); s.vx *= drag; s.vz *= drag;
+      s.vx -= fz * side * Math.min(1, c.grip * traction * dt); s.vz += fx * side * Math.min(1, c.grip * traction * dt);
+      const drag = Math.exp(-c.drag * (1 - recovery * .7) * dt); s.vx *= drag; s.vz *= drag;
       const v = Math.hypot(s.vx, s.vz), limit = c.maxSpeed * power + (s.boostTime > 0 ? c.boostImpulse : 0);
-      if (v > limit) { const ratio = Math.max(limit / v, Math.exp(-2 * dt)); s.vx *= ratio; s.vz *= ratio; }
+      if (v > limit && s.knockback <= 0) { const ratio = Math.max(limit / v, Math.exp(-2 * dt)); s.vx *= ratio; s.vz *= ratio; }
       s.x += s.vx * dt; s.z += s.vz * dt;
     }
     // Equal and opposite impulses depend on approach velocity and inverse mass.
@@ -75,9 +82,17 @@
       b.x += nx * correction * invB; b.z += nz * correction * invB;
       const approach = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
       if (approach < 0) {
-        const impulse = -(1 + c.restitution) * approach / (invA + invB);
+        const strength = -approach;
+        const force = 1 + (c.impactMultiplier - 1) * clamp((strength - c.impactThreshold) / 9, 0, 1);
+        // A boost only amplifies a hit if that boosted car is moving into contact.
+        const boosting = (a.boostTime > 0 && a.vx * nx + a.vz * nz > 1) || (b.boostTime > 0 && b.vx * nx + b.vz * nz < -1);
+        const impulse = Math.min(c.maxCollisionImpulse, (1 + c.restitution) * strength * force * (boosting ? c.boostImpactMultiplier : 1) / (invA + invB));
         a.vx -= impulse * nx * invA; a.vz -= impulse * nz * invA;
         b.vx += impulse * nx * invB; b.vz += impulse * nz * invB;
+        if (strength > c.impactThreshold) {
+          a.knockback = Math.max(a.knockback, c.knockbackDuration * clamp(impulse * invA / 16, .25, 1));
+          b.knockback = Math.max(b.knockback, c.knockbackDuration * clamp(impulse * invB / 16, .25, 1));
+        }
         if (-approach > 2) world.events.push({ type: 'hit', x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, strength: -approach, ids: [world.cars[i].id, world.cars[j].id] });
       }
     }

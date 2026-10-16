@@ -23,6 +23,8 @@ O anel externo pisca e treme quatro segundos antes de cair. A cada 16 segundos, 
 
 A direção tem resposta progressiva, aceleração mais rápida e freio dedicado antes de entrar em ré. O movimento visual é interpolado entre passos de física, e a câmera acompanha as curvas suavemente, abrindo o campo de visão com a velocidade e o boost. Batidas fortes e quedas do piso recebem um aviso curto na tela.
 
+Batidas fortes amplificam o impulso em até 1,6×. Acertar enquanto avança com boost acrescenta 30% de força. Após receber um impacto forte, o carrinho desliza por até 0,7 s com aderência e aceleração reduzidas, sem perder a capacidade de girar. Encostões continuam fracos; massa e velocidade ainda influenciam o resultado. Ajuste `impactMultiplier`, `boostImpactMultiplier`, `knockbackDuration`, `knockbackGrip`, `knockbackControl` e `maxCollisionImpulse` em **physics.js** para rebalancear. O limite de impulso evita que colisões em cadeia cresçam sem controle.
+
 ## Ajustar
 
 Todos os parâmetros estão em `BumperPhysics.CONFIG`, no início de **physics.js**: `bots`, `difficulty`, `mass`, `acceleration`, `maxSpeed`, `grip`, `restitution`, `boostImpulse`, `boostCooldown`, `phaseSeconds`, `warningSeconds` e `finalSeconds`.
