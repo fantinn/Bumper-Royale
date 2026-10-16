@@ -2,7 +2,9 @@
 (function (root) {
   'use strict';
   function update(world) {
-    const c = world.config;
+    const c = world.config, { safeAt } = root.BumperPhysics;
+    // Slippery floors need a longer look-ahead before the edge.
+    const lookAhead = .45 * Math.max(1, Math.min(2.2, 4.2 / c.grip));
     for (const car of world.cars) {
       if (!car.ai || !car.state.alive) continue;
       const ai = car.ai, s = car.state;
@@ -16,17 +18,20 @@
       }
       if (!target) { car.input = { throttle: 0, steer: 0, boost: false }; continue; }
       ai.target = target.id;
-      const t = target.state, r = Math.hypot(s.x, s.z);
-      const safeRadius = world.radius - (world.warning ? c.ringWidth : 0);
-      const projected = Math.hypot(s.x + s.vx * .45, s.z + s.vz * .45);
-      const retreat = r > safeRadius - 2.5 || projected > safeRadius - 1.6;
-      let tx = 0, tz = 0;
+      const t = target.state;
+      const retreat = !safeAt(world, s.x, s.z, 2.5) || !safeAt(world, s.x + s.vx * lookAhead, s.z + s.vz * lookAhead, 1.6);
+      let tx = 0, tz = 0, seeking = false;
       if (!retreat) {
-        const tr = Math.hypot(t.x, t.z) || 1;
-        // Approach from the inside to push a target outward, then commit to contact.
-        const flank = nearest > 5 ? 2.4 * (1 - ai.aggression * .5) : 0;
-        tx = t.x + t.vx * .16 - t.x / tr * flank;
-        tz = t.z + t.vz * .16 - t.z / tr * flank;
+        let pickup = null, distance = Infinity;
+        for (const p of world.pickups) { const d = Math.hypot(p.x - s.x, p.z - s.z); if (d < distance) { distance = d; pickup = p; } }
+        if (pickup && distance < 9 && distance < nearest * .8) { tx = pickup.x; tz = pickup.z; seeking = true; }
+        else {
+          const tr = Math.hypot(t.x, t.z) || 1;
+          // Approach from the inside to push a target outward, then commit to contact.
+          const flank = nearest > 5 ? 2.4 * (1 - ai.aggression * .5) : 0;
+          tx = t.x + t.vx * .16 - t.x / tr * flank;
+          tz = t.z + t.vz * .16 - t.z / tr * flank;
+        }
       }
       const desired = Math.atan2(tx - s.x, tz - s.z);
       const delta = Math.atan2(Math.sin(desired - s.angle), Math.cos(desired - s.angle));
@@ -34,7 +39,7 @@
       car.input = {
         steer: Math.max(-1, Math.min(1, delta * 1.9)),
         throttle: Math.abs(delta) > 1.6 ? (retreat ? -.7 : .15) : (retreat ? .9 : .65 + ai.aggression * .35),
-        boost: !retreat && aligned && nearest > 2.2 && nearest < 8 && r < safeRadius - (ai.aggression > .75 ? 3.5 : 5) && ai.aggression > .42 && s.knockback <= 0
+        boost: !retreat && !seeking && aligned && nearest > 2.2 && nearest < 8 && safeAt(world, s.x, s.z, ai.aggression > .75 ? 3.5 : 5) && ai.aggression > .42 && s.knockback <= 0
       };
     }
   }

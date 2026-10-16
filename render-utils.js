@@ -8,11 +8,11 @@ globalThis.BumperRender = {
     return out;
   },
   // Bake child transforms and colors once; hundreds of props become a few draws.
-  // Camera blockers remain independent so hiding one never hides the whole room.
+  // Camera blockers and animated props remain independent so they can still be changed.
   batch(T, group) {
     const buckets = new Map();
     for (const child of [...group.children]) {
-      if (!child.isMesh || child.userData.cameraObstacle || Array.isArray(child.material) || child.material.map) continue;
+      if (!child.isMesh || child.userData.cameraObstacle || child.userData.animated || Array.isArray(child.material) || child.material.map) continue;
       const source = child.material, glowing = source.emissive && source.emissive.getHex() !== 0;
       const key = `${source.side}:${glowing ? 1 : 0}`;
       if (!buckets.has(key)) buckets.set(key, { meshes: [], side: source.side, glowing });

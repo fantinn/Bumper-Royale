@@ -53,7 +53,8 @@ globalThis.BumperPavilion = {
       grid.push(-edge, height, p, edge, height, p, p, height, -edge, p, height, edge);
     }
     const gridGeometry = new T.BufferGeometry(); gridGeometry.setAttribute('position', new T.Float32BufferAttribute(grid, 3));
-    group.add(new T.LineSegments(gridGeometry, new T.LineBasicMaterial({ color: '#839395', transparent: true, opacity: .55 })));
+    const gridLines = new T.LineSegments(gridGeometry, new T.LineBasicMaterial({ color: '#839395', transparent: true, opacity: .55 }));
+    gridLines.userData.ownedMaterial = gridLines.material; group.add(gridLines);
     for (let z = -edge; z <= edge; z += edge / 3) {
       box(group, [edge * 2, .18, .18], '#a16b52', 0, height + .25, z);
       for (let x = -edge; x < edge; x += 6) beam([x, height + .25, z], [Math.min(edge, x + 3), height + 1.3, z], .06, '#c08b61');

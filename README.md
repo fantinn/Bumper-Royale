@@ -10,7 +10,7 @@ Abra **index.html** no Chrome, Edge ou Firefox com WebGL habilitado. Não há bu
 
 O mapa **Parque do Bairro** é um pavilhão de bate-bate com piso metálico, malha condutora no teto, bandeirinhas, bilheteria, bancos e espectadores. Cada carrinho tem uma haste coletora flexível: a sapata desliza no teto e solta faíscas ao dirigir, com rajadas maiores no boost. Ao cair, o carrinho perde contato e para de produzir faíscas. Os anéis da pista continuam cedendo sobre um fosso de manutenção para preservar o battle royale.
 
-Escolha a quantidade de bots e a dificuldade no menu e clique em **Jogar agora**.
+Escolha o mapa, a quantidade de bots, a dificuldade e a cor do carrinho no menu e clique em **Jogar agora**. Uma contagem regressiva de 3 segundos abre cada partida.
 
 - W / seta para cima: acelerar.
 - S / seta para baixo: frear e dar ré.
@@ -25,9 +25,28 @@ A direção tem resposta progressiva, aceleração mais rápida e freio dedicado
 
 Batidas fortes amplificam o impulso em até 1,6×. Acertar enquanto avança com boost acrescenta 30% de força. Após receber um impacto forte, o carrinho desliza por até 0,7 s com aderência e aceleração reduzidas, sem perder a capacidade de girar. Encostões continuam fracos; massa e velocidade ainda influenciam o resultado. Ajuste `impactMultiplier`, `boostImpactMultiplier`, `knockbackDuration`, `knockbackGrip`, `knockbackControl` e `maxCollisionImpulse` em **physics.js** para rebalancear. O limite de impulso evita que colisões em cadeia cresçam sem controle.
 
+## Mapas
+
+Escolha o mapa no menu; cada um tem cenário e regra próprios:
+
+- **Parque do Bairro** — o clássico: pavilhão com malha condutora no teto (os carrinhos soltam faíscas pela haste coletora) e anéis que cedem de fora para dentro.
+- **Rinque Congelado** — gelo com pouquíssima aderência: frear cedo é obrigatório. Arquibancadas, bonecos de neve e neve caindo.
+- **Carrossel Neon** — telhado noturno com skyline: a pista gira, puxa levemente para fora e tem bumpers de fliperama que arremessam quem encosta.
+- **Doca do Porto** — cais ao pôr do sol: o piso cai em fatias, em ordem aleatória, até sobrar só a ilha central. A fatia que vai cair pisca em vermelho.
+
+## Power-ups, KOs e progressão
+
+Itens aparecem pela pista a cada poucos segundos e são ativados ao passar por cima: ⚡ **recarga** (boost pronto na hora), 🔨 **pesado** (massa 1,8× por 6 s, o carrinho cresce) e 🌀 **onda de choque** (empurra todos por perto).
+
+Quem encostou por último em um carrinho até 3 s antes da queda leva o KO. O feed mostra quem derrubou quem, e KOs em sequência rendem DUPLO/TRIPLO KO.
+
+Cada partida dá XP (colocação, KOs, vitória e dificuldade). Subir de nível libera novas cores para o seu carrinho. Nível, vitórias, KOs, cor escolhida e o melhor resultado por mapa ficam salvos no navegador (`localStorage`).
+
+No celular aparecem controles de toque: joystick à esquerda (para frente acelera, para trás freia/dá ré, para os lados vira) e botão de boost à direita.
+
 ## Ajustar
 
-Todos os parâmetros estão em `BumperPhysics.CONFIG`, no início de **physics.js**: `bots`, `difficulty`, `mass`, `acceleration`, `maxSpeed`, `grip`, `restitution`, `boostImpulse`, `boostCooldown`, `phaseSeconds`, `warningSeconds` e `finalSeconds`.
+Todos os parâmetros estão em `BumperPhysics.CONFIG` (e as variações por mapa em `BumperPhysics.MAPS`), no início de **physics.js**: `bots`, `difficulty`, `mass`, `acceleration`, `maxSpeed`, `grip`, `restitution`, `boostImpulse`, `boostCooldown`, `phaseSeconds`, `warningSeconds` e `finalSeconds`.
 
 O menu sobrescreve `bots` e `difficulty` ao iniciar. Para mudar os valores padrão do menu ou oferecer outras quantidades, edite as opções `select` em **index.html**. Os perfis `difficultyProfiles` alteram potência e intervalo de reação da IA. Cada bot também recebe agressividade e massa ligeiramente diferentes.
 
@@ -39,7 +58,8 @@ Ao alterar a geometria, mantenha `radius - phases * ringWidth > 0`: essa diferen
 - **physics.js**: configuração, entidades, estado, física, colisões, fases e vitória; sem DOM/Three.js.
 - **ai.js**: decisões dos bots; gera `{ throttle, steer, boost }`, assim como o teclado.
 - **game.js**: Three.js, câmera, partículas, áudio, entrada e interface.
-- **pavilion.js**: cenário do parque e altura do teto (`ceilingHeight`); construído apenas uma vez, sem afetar a física.
+- **pavilion.js**: cenário do Parque do Bairro e altura do teto (`ceilingHeight`).
+- **maps.js**: cores, luz e cenário de cada mapa; as regras de jogo dos mesmos mapas ficam em `BumperPhysics.MAPS` (**physics.js**).
 - **render-utils.js**: agrupamento de geometrias por cores e pool de 128 partículas desenhadas em uma chamada.
 
 ## Desempenho
@@ -53,3 +73,4 @@ O menu renderiza até 30 FPS; a cena pausada, a tela de resultado e abas ocultas
 Cada entidade tem `id`, `input`, `state` e dados opcionais de IA. A simulação avança em passos fixos de 1/60 s. Para multiplayer futuro, execute a simulação em um servidor autoritativo, receba inputs validados por ID e replique snapshots aos clientes. A camada visual já está separada, mas rede, sincronização, previsão e lobby ainda precisam ser implementados. Esta versão é local: um jogador e bots.
 
 O projeto não precisa de servidor. Se preferir servir por HTTP com Python instalado: `python -m http.server 8080`, e abra http://localhost:8080.
+Testes: `node tests/simulation.cjs`, `node tests/impacts.cjs` e `node tests/maps.cjs`.
