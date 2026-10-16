@@ -15,11 +15,13 @@ Escolha a quantidade de bots e a dificuldade no menu e clique em **Jogar agora**
 - W / seta para cima: acelerar.
 - S / seta para baixo: frear e dar ré.
 - A e D / setas laterais: girar.
-- Espaço: boost curto, com recarga de quatro segundos.
+- Espaço: boost curto, com recarga de três segundos; toques rápidos também são registrados.
 - Esc: pausar. Sair da janela também pausa a partida.
 - Som: botão no canto superior direito; sintetizado no navegador.
 
-O anel externo pisca e treme cinco segundos antes de cair. A cada 20 segundos, uma faixa de quatro unidades desaparece. Depois da quinta queda, a ilha central permanece por 28 segundos e começa a diminuir continuamente, evitando partidas intermináveis. O último sobrevivente vence. Quedas simultâneas compartilham colocação; se todos caírem, não há vencedor. A tela de derrota aparece após a queda do jogador; jogar novamente inicia uma nova partida.
+O anel externo pisca e treme quatro segundos antes de cair. A cada 16 segundos, uma faixa de quatro unidades desaparece. Depois da quinta queda, a ilha central permanece por 18 segundos e começa a diminuir continuamente, evitando partidas intermináveis. O último sobrevivente vence. Quedas simultâneas compartilham colocação; se todos caírem, não há vencedor. A tela de derrota aparece após a queda do jogador; jogar novamente inicia uma nova partida.
+
+A direção tem resposta progressiva, aceleração mais rápida e freio dedicado antes de entrar em ré. O movimento visual é interpolado entre passos de física, e a câmera acompanha as curvas suavemente, abrindo o campo de visão com a velocidade e o boost. Batidas fortes e quedas do piso recebem um aviso curto na tela.
 
 ## Ajustar
 
@@ -36,6 +38,15 @@ Ao alterar a geometria, mantenha `radius - phases * ringWidth > 0`: essa diferen
 - **ai.js**: decisões dos bots; gera `{ throttle, steer, boost }`, assim como o teclado.
 - **game.js**: Three.js, câmera, partículas, áudio, entrada e interface.
 - **pavilion.js**: cenário do parque e altura do teto (`ceilingHeight`); construído apenas uma vez, sem afetar a física.
+- **render-utils.js**: agrupamento de geometrias por cores e pool de 128 partículas desenhadas em uma chamada.
+
+## Desempenho
+
+A renderização agrupa cenário, carrocerias e anéis para reduzir chamadas à GPU. Usa iluminação Lambert, sombras de contato simples e partículas reutilizadas; não há sombras dinâmicas nem luzes pontuais. A resolução interna começa limitada a 1 pixel por pixel CSS e a 1,44 milhão de pixels, e se reduz automaticamente até 65% quando a partida permanece lenta. A física continua em passos de 1/60 s e a quantidade de bots é preservada.
+
+O botão **Gráficos: auto / leve** permite forçar resolução de 65% imediatamente em máquinas mais lentas. Ele muda apenas os gráficos, sem reduzir bots ou alterar a velocidade da simulação.
+
+O menu renderiza até 30 FPS; a cena pausada, a tela de resultado e abas ocultas não ficam redesenhando continuamente. Para diagnóstico, abra o jogo com `?perf=1` no final da URL: mostra FPS, chamadas de desenho, triângulos e geometrias alocadas. FPS depende do hardware, tamanho da janela e carga do navegador.
 
 Cada entidade tem `id`, `input`, `state` e dados opcionais de IA. A simulação avança em passos fixos de 1/60 s. Para multiplayer futuro, execute a simulação em um servidor autoritativo, receba inputs validados por ID e replique snapshots aos clientes. A camada visual já está separada, mas rede, sincronização, previsão e lobby ainda precisam ser implementados. Esta versão é local: um jogador e bots.
 

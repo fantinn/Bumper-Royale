@@ -6,31 +6,48 @@
   if (!window.THREE) { fail('Não foi possível carregar o Three.js. Conecte-se à internet e recarregue a página.'); return; }
   const { CONFIG, createWorld, step } = BumperPhysics;
   const T = THREE, scene = new T.Scene();
+  // Opt-in diagnostics for comparing the same scene before/after optimization.
+  const perf = new URLSearchParams(location.search).has('perf') ? document.createElement('output') : null;
+  if (perf) { perf.id = 'performance'; perf.style.cssText = 'position:fixed;right:20px;bottom:85px;z-index:10;background:#142033;color:white;padding:8px;font:12px monospace'; document.body.appendChild(perf); }
+  let perfStart = performance.now(), perfFrames = 0;
   scene.background = new T.Color('#172532'); scene.fog = new T.Fog('#172532', 65, 150);
   let renderer;
-  try { renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }); }
+  try { renderer = new T.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' }); }
   catch (_) { fail('Este navegador não conseguiu iniciar o WebGL. Ative a aceleração de hardware e recarregue.'); return; }
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+  let resolutionScale = 1, frameAverage = 16.7, adaptTime = 0, renderDirty = true, lastDraw = 0, economy = false;
+  function resizeRenderer() {
+    renderer.setPixelRatio(Math.min(devicePixelRatio, resolutionScale, Math.sqrt(1440000 / (innerWidth * innerHeight))));
+    renderer.setSize(innerWidth, innerHeight);
+    renderDirty = true;
+  }
+  resizeRenderer(); // Never render four retina pixels for every CSS pixel.
+  renderer.shadowMap.enabled = false;
   renderer.outputColorSpace = T.SRGBColorSpace; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.2;
   $('view').appendChild(renderer.domElement);
   const camera = new T.PerspectiveCamera(46, innerWidth / innerHeight, .1, 260);
   scene.add(new T.HemisphereLight('#d5e6ed', '#4d3c51', 1.8));
-  const sun = new T.DirectionalLight('#ffe2b2', 2.1); sun.position.set(-20, 35, 15); sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -35, right: 35, top: 35, bottom: -35, near: 1, far: 100 }); sun.shadow.normalBias = .04; scene.add(sun);
+  const sun = new T.DirectionalLight('#ffe2b2', 2.1); sun.position.set(-20, 35, 15); scene.add(sun);
   const materials = new Map();
-  function mat(color, extra = {}) { const key = color + JSON.stringify(extra); if (!materials.has(key)) materials.set(key, new T.MeshStandardMaterial({ color, roughness: .65, ...extra })); return materials.get(key); }
+  function mat(color, extra = {}) { const { metalness, roughness, ...options } = extra; const key = color + JSON.stringify(options); if (!materials.has(key)) materials.set(key, new T.MeshLambertMaterial({ color, ...options })); return materials.get(key); }
   function mesh(geometry, material, parent, x = 0, y = 0, z = 0) { const m = new T.Mesh(geometry, material); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m; }
   function box(parent, size, color, x, y, z) { return mesh(new T.BoxGeometry(...size), mat(color), parent, x, y, z); }
   function cylinder(parent, rt, rb, height, color, x, y, z, sides = 16) { return mesh(new T.CylinderGeometry(rt, rb, height, sides), mat(color), parent, x, y, z); }
   const arena = new T.Group(); scene.add(arena);
   const ceilingHeight = BumperPavilion.ceilingHeight;
   const pavilion = BumperPavilion.build(T, scene, { mesh, box, cylinder, mat }, CONFIG.radius);
+  const cameraPosts = pavilion.children.filter(child => child.userData.cameraObstacle);
+  BumperRender.batch(T, pavilion);
+  pavilion.updateMatrixWorld(true);
+  pavilion.traverse(object => { object.matrixAutoUpdate = false; });
+  const sparks = BumperRender.particles(T, scene);
   const cameraRay = new T.Raycaster(), cameraSight = new T.Vector3(), cameraObstacles = [];
-  let rings = [], centerIsland, carModels = new Map(), particles = [], world, mode = 'menu', paused = false, accumulator = 0, lastTime = 0, shake = 0, endTimer = 0, audioContext = null, sound = false;
+  let rings = [], centerIsland, carModels = new Map(), world, mode = 'menu', paused = false, accumulator = 0, lastTime = 0, shake = 0, endTimer = 0, audioContext = null, sound = false, hudTime = 0;
+  let cameraAngle = 0, queuedBoost = false, feedbackTime = 0, nextSound = 0;
+  const feedback = document.createElement('div'); feedback.className = 'impact-feedback'; feedback.hidden = true; $('hud').appendChild(feedback);
+  function announce(text) { feedback.textContent = text; feedback.hidden = false; feedbackTime = 1.2; }
   const palette = ['#dfff72', '#ff795e', '#8271e8', '#56d5de', '#ffbd59', '#ef87bf', '#f1efe6', '#5292ef', '#b1e565', '#d8614e', '#94a3ff', '#5ac5a3'];
   // Dispose per-match geometry and textures, while retaining shared materials.
-  function disposeTree(group) { group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } }); group.removeFromParent(); }
+  function disposeTree(group) { group.traverse(o => { if (o.geometry) o.geometry.dispose(); o.userData.ownedMaterial?.dispose(); if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } }); group.removeFromParent(); }
   function wedge(inner, outer, start, end) {
     const shape = new T.Shape(); shape.moveTo(Math.cos(start) * outer, Math.sin(start) * outer);
     shape.absarc(0, 0, outer, start, end, false);
@@ -55,10 +72,12 @@
           const stripe = box(group, [.12, .025, 1], '#a6b3d1', Math.cos(a) * (outer - .65), .025, Math.sin(a) * (outer - .65)); stripe.rotation.y = -a + Math.PI / 2;
         }
       }
+      BumperRender.batch(T, group);
       rings.push({ group, index: ring, dropped: false, fall: 0 });
     }
     const circle = mesh(new T.RingGeometry(centerRadius * .74, centerRadius * .756, 64), mat('#cfbdf0', { side: T.DoubleSide }), centerIsland, 0, .025, 0); circle.rotation.x = -Math.PI / 2;
     for (let i = 0; i < 4; i++) { const mark = box(centerIsland, [.18, .03, centerRadius * .32], '#cfbdf0', Math.sin(i * Math.PI / 2) * centerRadius * .5, .03, Math.cos(i * Math.PI / 2) * centerRadius * .5); mark.rotation.y = i * Math.PI / 2; }
+    BumperRender.batch(T, centerIsland);
   }
   function label(text, color) {
     const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 96;
@@ -82,6 +101,10 @@
     const wheel = mesh(new T.TorusGeometry(.22, .045, 5, 12), mat('#26354c'), body, 0, 1.34, .41); wheel.rotation.x = -.6;
     for (const x of [-.5, .5]) box(body, [.25, .13, .07], '#fff2cb', x, .91, .94);
     cylinder(body, .13, .17, .45, '#242e39', -.63, 1.27, -.6, 8);
+    BumperRender.batch(T, body);
+    // Cheap contact shadows replace the dynamic shadow-map pass.
+    const shadow = mesh(new T.CircleGeometry(1.12, 16), new T.MeshBasicMaterial({ color: '#15212b', transparent: true, opacity: .3, depthWrite: false }), group, 0, .025, 0);
+    shadow.rotation.x = -Math.PI / 2; shadow.userData.ownedMaterial = shadow.material;
     // The collector is separate from body roll: its shoe stays on the ceiling plane.
     const collector = new T.Group(); group.add(collector);
     const poles = Array.from({ length: 3 }, () => mesh(new T.CylinderGeometry(.035, .045, 1, 6), mat('#b6c4ce', { metalness: .85, roughness: .22 }), collector));
@@ -90,54 +113,56 @@
     contact.castShadow = false;
     group.add(label(car.name, car.id === 0 ? '#dfff72' : '#ffffff'));
     if (car.id === 0) { const ring = mesh(new T.RingGeometry(1.25, 1.34, 40), new T.MeshBasicMaterial({ color: '#e4ff88', side: T.DoubleSide }), group, 0, .04, 0); ring.rotation.x = -Math.PI / 2; }
-    carModels.set(car.id, { group, body, poles, shoe, contact, sparkTime: car.id * .017 });
+    const s = car.state;
+    carModels.set(car.id, { group, body, poles, shoe, contact, previous: { x: s.x, y: s.y, z: s.z, angle: s.angle }, pose: { x: s.x, y: s.y, z: s.z, angle: s.angle }, sparkTime: car.id * .017 });
   }
   function prepare(options = {}) {
     for (const model of carModels.values()) disposeTree(model.group); carModels.clear();
-    for (const p of particles) { scene.remove(p.mesh); p.mesh.geometry.dispose(); } particles = [];
-    buildArena(); world = createWorld(options); world.cars.forEach(makeCar); accumulator = 0; endTimer = 0; shake = 0;
+    sparks.clear();
+    buildArena(); world = createWorld(options); world.cars.forEach(makeCar); accumulator = 0; endTimer = 0; shake = 0; queuedBoost = false; hudTime = 0; feedbackTime = 0; feedback.hidden = true;
     $('feed').replaceChildren(); $('result').hidden = true; $('pause').hidden = true; paused = false;
   }
   function start() {
     prepare({ bots: Number($('bots').value), difficulty: $('difficulty').value }); mode = 'playing';
     $('menu').hidden = true; $('sceneLabel').hidden = true; $('hud').hidden = false; keys.clear();
     const s = world.cars[0].state; camera.position.set(s.x - Math.sin(s.angle) * 14, 6, s.z - Math.cos(s.angle) * 14); camera.lookAt(s.x, 3.5, s.z);
+    cameraAngle = s.angle; lookTarget.set(s.x, 3.5, s.z); camera.fov = 46; camera.updateProjectionMatrix(); lastTime = 0; perfStart = performance.now(); perfFrames = 0;
     if (sound) initAudio();
+    updateHUD(); renderDirty = true;
   }
   const keys = new Set();
-  function setPause(value) { if (mode !== 'playing' || world.status !== 'playing') return; paused = value; $('pause').hidden = !value; keys.clear(); accumulator = 0; }
+  function setPause(value) { if (mode !== 'playing' || world.status !== 'playing') return; paused = value; $('pause').hidden = !value; keys.clear(); queuedBoost = false; renderDirty = true; lastTime = 0; perfStart = performance.now(); perfFrames = 0; }
   addEventListener('keydown', e => {
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code) && mode === 'playing') e.preventDefault();
     if (e.code === 'Escape' && !e.repeat) setPause(!paused);
+    if (e.code === 'Space' && !e.repeat && mode === 'playing' && !paused) queuedBoost = true;
     keys.add(e.code);
   });
   addEventListener('keyup', e => keys.delete(e.code));
   addEventListener('blur', () => { keys.clear(); setPause(true); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) setPause(true); });
   $('play').onclick = start; $('again').onclick = start; $('resume').onclick = () => setPause(false);
+  $('quality').onclick = () => { economy = !economy; resolutionScale = economy ? .65 : 1; frameAverage = 16.7; adaptTime = 0; resizeRenderer(); $('quality').textContent = economy ? 'Gráficos: leve' : 'Gráficos: auto'; $('quality').setAttribute('aria-pressed', String(economy)); };
   $('bots').onchange = () => { document.querySelector('#menu .eyebrow').textContent = `${Number($('bots').value) + 1} CARRINHOS. UM SOBREVIVENTE.`; };
   function initAudio() { try { audioContext ||= new (window.AudioContext || window.webkitAudioContext)(); audioContext.resume(); } catch (_) { sound = false; } }
   $('sound').onclick = () => { sound = !sound; if (sound) initAudio(); $('sound').textContent = sound ? 'Som: ligado' : 'Som: desligado'; $('sound').setAttribute('aria-pressed', String(sound)); };
   function tone(freq, duration, volume = .06) {
     if (!sound || !audioContext) return;
+    if (audioContext.currentTime < nextSound) return;
+    nextSound = audioContext.currentTime + .06;
     const oscillator = audioContext.createOscillator(), gain = audioContext.createGain(), now = audioContext.currentTime;
     oscillator.type = 'triangle'; oscillator.frequency.setValueAtTime(freq, now); oscillator.frequency.exponentialRampToValueAtTime(freq * .35, now + duration);
     gain.gain.setValueAtTime(volume, now); gain.gain.exponentialRampToValueAtTime(.001, now + duration);
     oscillator.connect(gain); gain.connect(audioContext.destination); oscillator.start(); oscillator.stop(now + duration);
   }
   function burst(x, z, count, color, y = .8, electric = false) {
-    for (let i = 0; i < count && particles.length < 250; i++) {
-      const p = mesh(new T.BoxGeometry(.13, .13, .13), mat(color, { emissive: color, emissiveIntensity: .5 }), scene, x, y, z);
-      p.castShadow = false; const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 5;
-      if (electric) p.scale.set(.4, 1.8, .4);
-      particles.push({ mesh: p, vx: Math.sin(a) * v, vz: Math.cos(a) * v, vy: electric ? -1 - Math.random() * 2 : 2 + Math.random() * 5, life: electric ? .15 + Math.random() * .22 : .4 + Math.random() * .5, electric });
-    }
+    sparks.emit(x, z, Math.min(count, 12), color, y, electric);
   }
   function events() {
     for (const event of world.events) {
-      if (event.type === 'hit') { burst(event.x, event.z, Math.min(22, Math.ceil(event.strength)), '#ffed9a'); if (event.ids.includes(0)) shake = Math.min(.7, event.strength * .025); tone(90 + event.strength * 8, .12); }
+      if (event.type === 'hit') { burst(event.x, event.z, Math.min(22, Math.ceil(event.strength)), '#ffed9a'); if (event.ids.includes(0)) { shake = Math.min(.4, event.strength * .018); if (event.strength > 10) announce('BATIDA FORTE!'); } tone(90 + event.strength * 8, .12); }
       if (event.type === 'boost') { const s = world.cars[event.id].state; burst(s.x, s.z, 10, '#caff77'); if (event.id === 0) tone(350, .25); }
-      if (event.type === 'collapse') { shake = .45; tone(70, .5, .1); }
+      if (event.type === 'collapse') { shake = .3; announce('O PISO CEDEU!'); tone(70, .5, .1); }
       if (event.type === 'elimination') {
         const line = document.createElement('div'); line.textContent = `${event.id === 0 ? 'VOCÊ' : 'CARRINHO ' + world.cars[event.id].name} caiu ↓`;
         $('feed').prepend(line); while ($('feed').children.length > 5) $('feed').lastChild.remove();
@@ -147,6 +172,7 @@
     }
   }
   function finish() {
+    renderDirty = true;
     mode = 'result'; $('hud').hidden = true; $('result').hidden = false;
     const player = world.cars[0].state, victory = world.winner === 0;
     $('resultEyebrow').textContent = victory ? 'A PISTA É SUA' : 'FIM DE PARTIDA';
@@ -165,20 +191,21 @@
     $('boostFill').style.width = `${(1 - cooldown / CONFIG.boostCooldown) * 100}%`;
     $('boostText').textContent = cooldown > 0 ? cooldown.toFixed(1) + 's' : 'PRONTO';
   }
-  const desiredCamera = new T.Vector3(), lookTarget = new T.Vector3();
+  const desiredCamera = new T.Vector3(), lookTarget = new T.Vector3(), desiredLook = new T.Vector3();
   const poleStart = new T.Vector3(), poleEnd = new T.Vector3(), poleDirection = new T.Vector3(), up = new T.Vector3(0, 1, 0);
   let visualTime = 0;
   function render(dt, now) {
     visualTime += dt;
     for (const car of world.cars) {
       const s = car.state, model = carModels.get(car.id);
-      model.group.position.set(s.x, s.y, s.z); model.body.rotation.y = s.angle;
-      model.body.rotation.z = s.alive ? -car.input.steer * Math.min(.06, Math.hypot(s.vx, s.vz) * .004) : s.y * .09;
+      const pose = BumperRender.pose(model.previous, s, mode === 'playing' && world.status === 'playing' ? accumulator / CONFIG.tick : 1, model.pose);
+      model.group.position.set(pose.x, pose.y, pose.z); model.body.rotation.y = pose.angle;
+      model.body.rotation.z = s.alive ? -s.steering * Math.min(.075, Math.hypot(s.vx, s.vz) * .004) : s.y * .09;
       model.group.visible = s.y > -55;
       const speed = Math.hypot(s.vx, s.vz);
-      const bx = -.63 * Math.cos(s.angle) - .6 * Math.sin(s.angle), bz = .63 * Math.sin(s.angle) - .6 * Math.cos(s.angle);
+      const bx = -.63 * Math.cos(pose.angle) - .6 * Math.sin(pose.angle), bz = .63 * Math.sin(pose.angle) - .6 * Math.cos(pose.angle);
       const tx = bx - s.vx * .035, tz = bz - s.vz * .035;
-      const top = ceilingHeight - (s.alive ? s.y : 0) - .045;
+      const top = ceilingHeight - (s.alive ? pose.y : 0) - .045;
       for (let j = 0; j < model.poles.length; j++) {
         const a = j / 3, b = (j + 1) / 3;
         const bend = s.alive ? Math.sin(visualTime * 21 + car.id) * Math.min(.08, speed * .006) : 0;
@@ -187,7 +214,7 @@
         const pole = model.poles[j]; pole.position.copy(poleStart).add(poleEnd).multiplyScalar(.5);
         poleDirection.copy(poleEnd).sub(poleStart); pole.scale.y = poleDirection.length(); pole.quaternion.setFromUnitVectors(up, poleDirection.normalize());
       }
-      model.shoe.position.set(tx, top, tz); model.shoe.rotation.y = s.angle;
+      model.shoe.position.set(tx, top, tz); model.shoe.rotation.y = pose.angle;
       model.contact.position.set(tx, top - .04, tz);
       const moving = mode === 'menu' || (mode === 'playing' && speed > .6);
       model.contact.visible = s.alive && moving;
@@ -210,19 +237,19 @@
     // The central disk visibly contracts together with the final sudden-death boundary.
     const scale = world.phase === CONFIG.phases ? world.radius / (CONFIG.radius - CONFIG.phases * CONFIG.ringWidth) : 1;
     centerIsland.scale.set(scale, 1, scale);
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i]; p.life -= dt; p.vy -= 14 * dt;
-      p.mesh.position.x += p.vx * dt; p.mesh.position.y += p.vy * dt; p.mesh.position.z += p.vz * dt; p.mesh.rotation.x += dt * 6;
-      const fade = Math.max(.01, Math.min(1, p.life * (p.electric ? 7 : 3))); p.mesh.scale.set(fade * (p.electric ? .4 : 1), fade * (p.electric ? 1.8 : 1), fade * (p.electric ? .4 : 1));
-      if (p.life <= 0) { scene.remove(p.mesh); p.mesh.geometry.dispose(); particles.splice(i, 1); }
-    }
+    sparks.update(dt);
     if (mode === 'menu') {
       camera.position.set(10, 6.8, 28); camera.lookAt(innerWidth > 700 ? -10 : 0, 3.7, -6);
     } else if (mode === 'playing') {
-      const s = world.cars[0].state;
-      desiredCamera.set(s.x - Math.sin(s.angle) * 14, 6, s.z - Math.cos(s.angle) * 14);
-      camera.position.lerp(desiredCamera, 1 - Math.exp(-3.3 * dt));
-      lookTarget.set(s.x + Math.sin(s.angle) * 3, 3.5, s.z + Math.cos(s.angle) * 3);
+      const s = world.cars[0].state, pose = carModels.get(0).pose;
+      const angleDelta = Math.atan2(Math.sin(pose.angle - cameraAngle), Math.cos(pose.angle - cameraAngle));
+      cameraAngle += angleDelta * (1 - Math.exp(-5 * dt));
+      desiredCamera.set(pose.x - Math.sin(cameraAngle) * 14, 6, pose.z - Math.cos(cameraAngle) * 14);
+      camera.position.lerp(desiredCamera, 1 - Math.exp(-6 * dt));
+      desiredLook.set(pose.x + Math.sin(cameraAngle) * 3, 3.5, pose.z + Math.cos(cameraAngle) * 3);
+      lookTarget.lerp(desiredLook, 1 - Math.exp(-10 * dt));
+      const desiredFov = 46 + Math.min(6, Math.hypot(s.vx, s.vz) * .25) + (s.boostTime > 0 ? 3 : 0);
+      if (Math.abs(camera.fov - desiredFov) > .02) { camera.fov += (desiredFov - camera.fov) * (1 - Math.exp(-5 * dt)); camera.updateProjectionMatrix(); }
       camera.lookAt(lookTarget); shake *= Math.exp(-7 * dt);
       if (shake > .005 && !paused) { camera.position.x += (Math.random() - .5) * shake; camera.position.y += (Math.random() - .5) * shake; }
     }
@@ -234,28 +261,48 @@
       const s = world.cars[0].state;
       cameraSight.set(s.x, Math.max(0, s.y) + 1.2, s.z).sub(camera.position);
       cameraRay.far = cameraSight.length(); cameraRay.set(camera.position, cameraSight.normalize());
-      pavilion.updateMatrixWorld(true);
-      for (const hit of cameraRay.intersectObjects(pavilion.children, true)) {
+      for (const hit of cameraRay.intersectObjects(cameraPosts, false)) {
         if (hit.object.isMesh && hit.object.visible) { hit.object.visible = false; cameraObstacles.push(hit.object); }
       }
     }
     renderer.render(scene, camera);
+    if (perf && ++perfFrames && performance.now() - perfStart >= 1000) {
+      perf.textContent = `${Math.round(perfFrames * 1000 / (performance.now() - perfStart))} FPS | ${renderer.info.render.calls} draws | ${renderer.info.render.triangles} triangles | ${renderer.info.memory.geometries} geometries`;
+      perfFrames = 0; perfStart = performance.now();
+    }
   }
   function frame(ms) {
     requestAnimationFrame(frame);
-    const now = ms / 1000, dt = Math.min(.05, lastTime ? now - lastTime : 0); lastTime = now;
+    if (document.hidden) { lastTime = 0; return; }
+    if ((paused || mode === 'result') && !renderDirty) { lastTime = 0; return; }
+    if (mode === 'menu' && ms - lastDraw < 1000 / 30) return;
+    lastDraw = ms;
+    const now = ms / 1000, elapsed = lastTime ? now - lastTime : 0, dt = Math.min(.1, elapsed); lastTime = now;
+    // Sustained slow frames lower resolution, without changing physics or bot count.
+    if (!paused && mode === 'playing' && elapsed > 0 && elapsed < .2) {
+      frameAverage += (elapsed * 1000 - frameAverage) * .025; adaptTime += elapsed;
+      if (adaptTime > 4) { if (!economy && frameAverage > 23 && resolutionScale > .65) { resolutionScale = Math.max(.65, resolutionScale - .15); resizeRenderer(); } adaptTime = 0; }
+    }
     if (mode === 'playing' && !paused) {
       const player = world.cars[0];
-      player.input = { throttle: Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown')), steer: Number(keys.has('KeyA') || keys.has('ArrowLeft')) - Number(keys.has('KeyD') || keys.has('ArrowRight')), boost: keys.has('Space') };
+      player.input = { throttle: Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown')), steer: Number(keys.has('KeyA') || keys.has('ArrowLeft')) - Number(keys.has('KeyD') || keys.has('ArrowRight')), boost: queuedBoost || keys.has('Space') };
       accumulator += dt;
-      while (accumulator >= CONFIG.tick) { if (world.status === 'playing') { BumperAI.update(world); step(world, CONFIG.tick); events(); } accumulator -= CONFIG.tick; }
+      while (accumulator >= CONFIG.tick) {
+        if (world.status === 'playing') {
+          for (const car of world.cars) { const previous = carModels.get(car.id).previous, s = car.state; previous.x = s.x; previous.y = s.y; previous.z = s.z; previous.angle = s.angle; }
+          BumperAI.update(world); step(world, CONFIG.tick); queuedBoost = false; events();
+        }
+        accumulator -= CONFIG.tick;
+      }
       // Continue the falling animation after the winner has been resolved.
       if (world.status === 'finished') for (const car of world.cars) if (!car.state.alive) { car.state.vy -= 24 * dt; car.state.y += car.state.vy * dt; }
-      updateHUD();
+      hudTime += dt; if (hudTime >= .1) { updateHUD(); hudTime = 0; }
       if (endTimer > 0) { endTimer -= dt; if (endTimer <= 0) finish(); }
+      if (feedbackTime > 0) { feedbackTime -= dt; if (feedbackTime <= 0) feedback.hidden = true; }
     }
     render(paused ? 0 : dt, now);
+    renderDirty = false;
   }
-  addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+  addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); resizeRenderer(); });
   prepare(); $('play').disabled = false; $('play').textContent = 'JOGAR AGORA ↗'; requestAnimationFrame(frame);
 })();

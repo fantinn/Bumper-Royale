@@ -4,11 +4,11 @@
   'use strict';
   const CONFIG = {
     bots: 11, difficulty: 'normal', tick: 1 / 60,
-    radius: 25, ringWidth: 4, phases: 5, phaseSeconds: 20, warningSeconds: 5,
-    carRadius: 1.05, mass: 1, acceleration: 16, reverseAcceleration: 10,
-    maxSpeed: 12, turnSpeed: 2.65, drag: .7, grip: 3.2,
-    restitution: .88, boostImpulse: 12, boostCooldown: 4, boostDuration: .38,
-    finalSeconds: 28,
+    radius: 25, ringWidth: 4, phases: 5, phaseSeconds: 16, warningSeconds: 4,
+    carRadius: 1.05, mass: 1, acceleration: 22, reverseAcceleration: 12, brakeAcceleration: 32,
+    maxSpeed: 14, turnSpeed: 2.8, steeringResponse: 14, drag: .8, grip: 4.2,
+    restitution: .88, boostImpulse: 12, boostCooldown: 3, boostDuration: .42,
+    finalSeconds: 18,
     difficultyProfiles: { easy: { power: .74, reaction: .48 }, normal: { power: .94, reaction: .23 }, hard: { power: 1.08, reaction: .12 } }
   };
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -20,7 +20,7 @@
       const r = config.radius * (i % 2 ? .66 : .77);
       world.cars.push({ id: i, name: i === 0 ? 'VOCÊ' : String(i).padStart(2, '0'),
         input: { throttle: 0, steer: 0, boost: false },
-        state: { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, angle: a + Math.PI, y: 0, vy: 0, alive: true, cooldown: 0, boostTime: 0, mass: config.mass * (i ? .92 + random() * .16 : 1) },
+        state: { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, angle: a + Math.PI, steering: 0, y: 0, vy: 0, alive: true, cooldown: 0, boostTime: 0, mass: config.mass * (i ? .92 + random() * .16 : 1) },
         ai: i ? { aggression: .3 + random() * .7, nextThink: 0, target: null } : null });
     }
     return world;
@@ -40,7 +40,8 @@
       if (!s.alive) { s.vy -= 24 * dt; s.y += s.vy * dt; s.x += s.vx * dt; s.z += s.vz * dt; continue; }
       s.cooldown = Math.max(0, s.cooldown - dt); s.boostTime = Math.max(0, s.boostTime - dt);
       const speed = Math.hypot(s.vx, s.vz);
-      s.angle += clamp(input.steer, -1, 1) * c.turnSpeed * (.45 + .55 * Math.min(1, speed / 5)) * dt;
+      s.steering += (clamp(input.steer, -1, 1) - s.steering) * (1 - Math.exp(-c.steeringResponse * dt));
+      s.angle += s.steering * c.turnSpeed * (.6 + .4 * Math.min(1, speed / 5)) * dt;
       const fx = Math.sin(s.angle), fz = Math.cos(s.angle);
       if (input.boost && s.cooldown <= 0) {
         s.vx += fx * c.boostImpulse; s.vz += fz * c.boostImpulse;
@@ -49,7 +50,9 @@
       }
       const power = car.ai ? c.difficultyProfiles[c.difficulty].power : 1;
       const throttle = clamp(input.throttle, -1, 1);
-      const accel = (throttle >= 0 ? c.acceleration : c.reverseAcceleration) * power;
+      const forwardSpeed = s.vx * fx + s.vz * fz;
+      const braking = throttle * forwardSpeed < 0;
+      const accel = (braking ? c.brakeAcceleration : throttle >= 0 ? c.acceleration : c.reverseAcceleration) * power;
       s.vx += fx * throttle * accel * dt; s.vz += fz * throttle * accel * dt;
       // Remove lateral velocity gradually: grip with a small, readable arcade drift.
       const side = s.vx * fz - s.vz * fx;
@@ -63,10 +66,10 @@
     for (let i = 0; i < world.cars.length; i++) for (let j = i + 1; j < world.cars.length; j++) {
       const a = world.cars[i].state, b = world.cars[j].state;
       if (!a.alive || !b.alive) continue;
-      let dx = b.x - a.x, dz = b.z - a.z, distance = Math.hypot(dx, dz);
-      if (distance >= c.carRadius * 2) continue;
-      if (distance < .0001) { dx = 1; dz = 0; distance = 1; }
-      const nx = dx / distance, nz = dz / distance, invA = 1 / a.mass, invB = 1 / b.mass;
+      const dx = b.x - a.x, dz = b.z - a.z, squared = dx * dx + dz * dz;
+      if (squared >= c.carRadius * c.carRadius * 4) continue;
+      const distance = Math.sqrt(squared);
+      const nx = distance > .0001 ? dx / distance : 1, nz = distance > .0001 ? dz / distance : 0, invA = 1 / a.mass, invB = 1 / b.mass;
       const correction = Math.max(0, c.carRadius * 2 - distance) / (invA + invB);
       a.x -= nx * correction * invA; a.z -= nz * correction * invA;
       b.x += nx * correction * invB; b.z += nz * correction * invB;

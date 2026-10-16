@@ -21,8 +21,8 @@ function carAt(car, x, z, vx = 0, vz = 0) { Object.assign(car.state, { x, z, vx,
 }
 {
   const w = createWorld({ bots: 1 }); carAt(w.cars[0], 0, 0); carAt(w.cars[1], 24, 0);
-  w.time = 15; step(w, CONFIG.tick); assert.ok(w.warning);
-  w.time = 20; step(w, CONFIG.tick);
+  w.time = CONFIG.phaseSeconds - CONFIG.warningSeconds; step(w, CONFIG.tick); assert.ok(w.warning);
+  w.time = CONFIG.phaseSeconds; step(w, CONFIG.tick);
   assert.equal(w.radius, 21); assert.equal(w.cars[1].state.alive, false);
   assert.equal(w.winner, 0); assert.equal(w.cars[1].state.place, 2);
 }
@@ -32,6 +32,28 @@ function carAt(car, x, z, vx = 0, vz = 0) { Object.assign(car.state, { x, z, vx,
   assert.equal(w.cars[0].state.place, w.cars[1].state.place);
 }
 let maxSeconds = 0;
+{
+  const w = createWorld({ bots: 1 }); carAt(w.cars[0], 0, 0, 10); carAt(w.cars[1], -10, 0);
+  w.cars[0].input.throttle = -1;
+  for (let i = 0; i < 12; i++) step(w, CONFIG.tick);
+  assert.ok(w.cars[0].state.vx < 4, 'brake responds within 200ms');
+  w.cars[0].input.steer = 1; step(w, CONFIG.tick);
+  assert.ok(w.cars[0].state.steering > 0 && w.cars[0].state.steering < 1, 'progressive steering');
+}
+{
+  const w = createWorld({ bots: 1 }); carAt(w.cars[0], 0, 0); carAt(w.cars[1], 0, 0);
+  step(w, CONFIG.tick);
+  assert.ok(Math.abs(w.cars[0].state.x - w.cars[1].state.x) >= CONFIG.carRadius * 2 - 1e-6, 'coincident cars separate completely');
+}
+require('../render-utils.js');
+{
+  const previous = { x: 0, y: 0, z: 0, angle: Math.PI - .1 };
+  const current = { x: 2, y: 4, z: 6, angle: -Math.PI + .1 };
+  const pose = BumperRender.pose(previous, current, .5, {});
+  assert.equal(pose.x, 1); assert.equal(pose.y, 2); assert.equal(pose.z, 3);
+  assert.ok(Math.abs(pose.angle - Math.PI) < 1e-8, 'interpolate across angle wrap without spinning');
+  assert.equal(current.x, 2, 'render interpolation does not mutate authoritative state');
+}
 for (const difficulty of ['easy', 'normal', 'hard']) for (const bots of [5, 11, 23]) for (let s = 1; s <= 3; s++) {
   const w = createWorld({ bots, difficulty }, seed(s));
   // Also drive entity zero through the AI contract to exercise full matches.

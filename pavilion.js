@@ -33,7 +33,8 @@ globalThis.BumperPavilion = {
       box(group, [edge * 2, .22, .65], '#efbd70', 0, 1.9, side * edge);
       for (let p = -edge; p <= edge; p += edge / 3) {
         for (const [x, z] of [[p, side * edge], [side * edge, p]]) {
-          cylinder(group, .22, .28, height + 1.5, '#c4624d', x, height / 2 - .6, z, 8);
+          const post = cylinder(group, .22, .28, height + 1.5, '#c4624d', x, height / 2 - .6, z, 8);
+          post.userData.cameraObstacle = true;
           cylinder(group, .42, .42, .5, '#ebc17a', x, -.4, z, 8);
         }
       }
@@ -60,10 +61,7 @@ globalThis.BumperPavilion = {
     for (const x of [-18, 0, 18]) for (const z of [-18, 0, 18]) {
       const lamp = mesh(new T.BoxGeometry(4, .09, .22), glow('#fff0bc'), group, x, height - .15, z); lamp.castShadow = false;
     }
-    // Only a handful of unshadowed lights: colorful atmosphere without costly per-bulb lights.
-    for (const [x, z, color] of [[-20, -15, '#ffb878'], [20, -15, '#72dfe9'], [0, 20, '#ffbddd']]) {
-      const light = new T.PointLight(color, 65, 58, 1.3); light.position.set(x, 7, z); scene.add(light);
-    }
+    // Colored bulbs are baked into an unlit batch; no per-pixel point lights.
     sign('BATE BATE', 'PARQUE DO BAIRRO  •  SÓ SOBRA UM', 19, 0, 5.1, -edge + .4);
     sign('SEGURE FIRME!', 'ACELERE  •  EMPURRE  •  SOBREVIVA', 13, -edge + .4, 4.5, 0, Math.PI / 2);
     sign('ÚLTIMA RODADA', 'O PISO VAI CEDER!', 13, edge - .4, 4.5, 0, -Math.PI / 2);
