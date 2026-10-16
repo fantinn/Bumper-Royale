@@ -109,7 +109,7 @@
     tagline: 'A PISTA GIRA. A CIDADE ASSISTE.',
     sky: ['#07031a', '#1b0b3a', '#4a1560'], fog: [60, 175], fogColor: '#2a0f45', hemi: ['#b9a6ff', '#2a1440', 1.5], sun: ['#ff9fe0', 1.4], exposure: 1.25,
     ceiling: () => 8.8,
-    floor: { outerA: '#ff3fa4', outerB: '#1a1336', ringA: '#2a2150', ringB: '#231b45', island: '#3a2a6e', mark: '#47f2ff', stripe: '#47f2ff', glowStripe: true },
+    floor: { outerA: '#2a1050', outerB: '#160f30', ringA: '#1b1438', ringB: '#171030', island: '#22164a', mark: '#47f2ff', stripe: '#47f2ff', glowStripe: true, glowFloor: true },
     bumper: { base: '#1a1336', top: '#ff3fa4' },
     build(T, scene, helpers, radius) {
       const { mesh, box, cylinder, mat } = helpers;
@@ -131,7 +131,8 @@
         const a = i / 12 * Math.PI * 2, x = Math.sin(a) * edge, z = Math.cos(a) * edge;
         const post = cylinder(group, .25, .3, height + 2.5, '#2b2152', x, height / 2 - 1, z, 8);
         post.userData.cameraObstacle = true;
-        mesh(new T.BoxGeometry(.12, height, .12), glow(i % 2 ? '#47f2ff' : '#ff3fa4'), group, x * .985, height / 2 - .5, z * .985);
+        // The glow strip is a child of its post so the camera hides both together.
+        mesh(new T.BoxGeometry(.12, height, .12), glow(i % 2 ? '#47f2ff' : '#ff3fa4'), post, -x * .015, .5, -z * .015);
       }
       const canopy = mesh(new T.CircleGeometry(edge + 1, 48), mat('#120a26'), group, 0, height + .14, 0);
       canopy.rotation.x = Math.PI / 2; canopy.castShadow = false;

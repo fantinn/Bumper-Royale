@@ -6,3 +6,6 @@ preview.png
 .DS_Store
 Thumbs.db
 .vscode/
+
+# itch.io build output
+dist/

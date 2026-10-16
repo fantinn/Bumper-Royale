@@ -40,7 +40,7 @@
   let cameraAngle = 0, queuedBoost = false, feedbackTime = 0, nextSound = 0, countdown = 0, countdownShown = '', playerTime = 0, killer = null, koStreak = 0, lastKo = -9;
   let theme, scenery = null, cameraPosts = [], ceilingHeight = null, skyTexture = null;
   const feedback = document.createElement('div'); feedback.className = 'impact-feedback'; feedback.hidden = true; $('hud').appendChild(feedback);
-  function announce(text) { feedback.textContent = text; feedback.hidden = false; feedbackTime = 1.3; feedback.classList.remove('pop'); void feedback.offsetWidth; feedback.classList.add('pop'); }
+  function announce(text, small = false) { feedback.textContent = text; feedback.classList.toggle("small", small); feedback.hidden = false; feedbackTime = 1.3; feedback.classList.remove('pop'); void feedback.offsetWidth; feedback.classList.add('pop'); }
   const palette = ['#dfff72', '#ff795e', '#8271e8', '#56d5de', '#ffbd59', '#ef87bf', '#f1efe6', '#5292ef', '#b1e565', '#d8614e', '#94a3ff', '#5ac5a3'];
 
   // ---- Profile: local progression, unlockable colors and per-map records. ----
@@ -92,7 +92,7 @@
     group.traverse(o => {
       if (o.geometry && !o.userData.sharedGeometry) o.geometry.dispose();
       o.userData.ownedMaterial?.dispose();
-      if (o.material?.map) { o.material.map.dispose(); o.material.dispose(); }
+      if (o.material?.map && !o.userData.sharedTexture) { o.material.map.dispose(); o.material.dispose(); }
     });
     group.removeFromParent();
   }
@@ -105,9 +105,33 @@
   }
   // Wedge angles follow the simulation's atan2(x, z) convention.
   const tile = (group, inner, outer, a, b, color) => { const m = mesh(wedge(inner + .035, outer - .035, a - Math.PI / 2 + .002, b - Math.PI / 2 - .002), mat(color), group); m.userData.original = m.material; return m; };
+  const floorTextures = new Map(), warnGlow = new T.Color('#ff3a2a');
+  function floorTexture(config) {
+    if (!floorTextures.has(theme.id)) {
+      const painted = BumperFloors.paint(theme.id, config);
+      let texture = null;
+      if (painted) {
+        texture = new T.CanvasTexture(painted.canvas); texture.colorSpace = T.SRGBColorSpace;
+        texture.anisotropy = renderer.capabilities.getMaxAnisotropy(); texture.userData.half = painted.half;
+      }
+      floorTextures.set(theme.id, texture);
+    }
+    return floorTextures.get(theme.id);
+  }
+  // UVs come from world-space position so every slice samples its own part of the canvas.
+  function floorOverlay(geometry, parent, texture) {
+    geometry.rotateX(-Math.PI / 2);
+    const position = geometry.attributes.position, uv = geometry.attributes.uv, half = texture.userData.half;
+    for (let i = 0; i < position.count; i++) uv.setXY(i, position.getX(i) / (2 * half) + .5, .5 - position.getZ(i) / (2 * half));
+    const glowing = Boolean(theme.floor.glowFloor);
+    const material = new T.MeshLambertMaterial({ map: texture, emissiveMap: glowing ? texture : null, emissive: glowing ? '#ffffff' : '#000000', emissiveIntensity: glowing ? .7 : 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const overlay = new T.Mesh(geometry, material); overlay.position.y = .004;
+    Object.assign(overlay.userData, { overlay: true, sharedTexture: true, ownedMaterial: material, emissive: material.emissive.clone() });
+    parent.add(overlay);
+  }
   function buildArena() {
     for (const child of [...arena.children]) disposeTree(child);
-    const c = world.config, f = theme.floor, stripe = f.glowStripe ? glow(f.stripe) : mat(f.stripe);
+    const c = world.config, f = theme.floor, stripe = f.glowStripe ? glow(f.stripe) : mat(f.stripe), painted = floorTexture(c);
     zones = []; bumperModels = []; centerIsland = new T.Group(); arena.add(centerIsland);
     cylinder(centerIsland, c.islandRadius, Math.max(.1, c.islandRadius - .5), 1.15, f.island, 0, -.575, 0, 64);
     for (let index = 0; index < c.phases; index++) { const group = new T.Group(); arena.add(group); zones.push({ group, index, fall: 0 }); }
@@ -128,12 +152,19 @@
         for (let n = 0; n < 32; n++) {
           const a = n / 32 * Math.PI * 2, b = (n + 1) / 32 * Math.PI * 2;
           tile(group, inner, outer, a, b, index === 0 ? (n % 2 ? f.outerB : f.outerA) : (index % 2 ? f.ringA : f.ringB));
-          if (index > 0 && n % 2 === 0) { const mark = new T.Mesh(new T.BoxGeometry(.12, .025, 1), stripe); mark.position.set(Math.sin(a) * (outer - .65), .025, Math.cos(a) * (outer - .65)); mark.rotation.y = a; group.add(mark); }
+          if (!painted && index > 0 && n % 2 === 0) { const mark = new T.Mesh(new T.BoxGeometry(.12, .025, 1), stripe); mark.position.set(Math.sin(a) * (outer - .65), .025, Math.cos(a) * (outer - .65)); mark.rotation.y = a; group.add(mark); }
         }
       });
     }
+    if (painted) {
+      // Painted top surfaces: one textured overlay per zone, sliced from the same world-space canvas.
+      if (c.collapse === 'sectors') zones.forEach(({ group, index }) => { const a0 = index / c.phases * Math.PI * 2, a1 = (index + 1) / c.phases * Math.PI * 2; floorOverlay(new T.RingGeometry(c.islandRadius + .035, c.radius - .035, 24, 1, a0 - Math.PI / 2 + .002, a1 - a0 - .004), group, painted); });
+      else zones.forEach(({ group, index }) => { const outer = c.radius - index * c.ringWidth; floorOverlay(new T.RingGeometry(outer - c.ringWidth + .035, outer - .035, 96, 1), group, painted); });
+      floorOverlay(new T.CircleGeometry(c.islandRadius - .02, 64), centerIsland, painted);
+    } else {
     const circle = mesh(new T.RingGeometry(c.islandRadius * .74, c.islandRadius * .756, 64), mat(f.mark, { side: T.DoubleSide }), centerIsland, 0, .025, 0); circle.rotation.x = -Math.PI / 2;
     for (let i = 0; i < 4; i++) { const mark = box(centerIsland, [.18, .03, c.islandRadius * .32], f.mark, Math.sin(i * Math.PI / 2) * c.islandRadius * .5, .03, Math.cos(i * Math.PI / 2) * c.islandRadius * .5); mark.rotation.y = i * Math.PI / 2; }
+    }
     // Bumpers ride on the zone that holds them and fall together with it.
     const bumperStyle = theme.bumper || { base: '#2b3446', top: '#ff795e' };
     for (const b of world.bumpers) cylinder(b.zone >= 0 ? zones[b.zone].group : centerIsland, b.r, b.r * 1.1, .9, bumperStyle.base, b.x, .45, b.z, 20);
@@ -147,11 +178,14 @@
     }
   }
   function label(text, color) {
-    const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 96;
-    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#19223bdc'; ctx.beginPath(); ctx.roundRect(8, 8, 240, 80, 25); ctx.fill();
-    ctx.fillStyle = color; ctx.font = 'bold 42px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 128, 50);
+    // The tag grows with the name so "Tia Neide 👵" fits as well as "VOCÊ".
+    const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d'), font = 'bold 40px Arial, "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+    ctx.font = font; const width = Math.min(504, Math.max(240, Math.ceil(ctx.measureText(text).width) + 56));
+    canvas.width = width + 8; canvas.height = 96;
+    ctx.fillStyle = '#19223bdc'; ctx.beginPath(); ctx.roundRect(4, 8, width, 80, 25); ctx.fill();
+    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, canvas.width / 2, 50, width - 24);
     const texture = new T.CanvasTexture(canvas); texture.colorSpace = T.SRGBColorSpace;
-    const sprite = new T.Sprite(new T.SpriteMaterial({ map: texture, depthWrite: false })); sprite.scale.set(2.3, .86, 1); sprite.position.y = 3.4; return sprite;
+    const sprite = new T.Sprite(new T.SpriteMaterial({ map: texture, depthWrite: false })); sprite.scale.set(.86 * canvas.width / 96, .86, 1); sprite.position.y = 3.4; return sprite;
   }
   function makeCar(car, color) {
     const group = new T.Group(), body = new T.Group(); group.add(body); scene.add(group);
@@ -203,7 +237,7 @@
       shoe = box(collector, [.5, .065, .3], '#e1c291', 0, ceilingHeight - .035, 0);
       contact = mesh(new T.SphereGeometry(.075, 8, 6), mat('#fff4cd', { emissive: '#bdeaff', emissiveIntensity: 5 }), collector);
     }
-    group.add(label(car.name, car.id === 0 ? '#dfff72' : '#ffffff'));
+    group.add(label(car.emoji ? `${car.name} ${car.emoji}` : car.name, car.id === 0 ? '#dfff72' : '#ffffff'));
     if (car.id === 0) { const ring = mesh(new T.RingGeometry(1.25, 1.34, 40), new T.MeshBasicMaterial({ color: '#e4ff88', side: T.DoubleSide }), group, 0, .04, 0); ring.rotation.x = -Math.PI / 2; ring.userData.ownedMaterial = ring.material; }
     const s = car.state;
     carModels.set(car.id, { group, body, poles, shoe, contact, previous: { x: s.x, y: s.y, z: s.z, angle: s.angle }, pose: { x: s.x, y: s.y, z: s.z, angle: s.angle }, sparkTime: car.id * .017, size: 1, squash: 0 });
@@ -259,6 +293,9 @@
     const s = world.cars[0].state; camera.position.set(s.x - Math.sin(s.angle) * 14, 6, s.z - Math.cos(s.angle) * 14); camera.lookAt(s.x, 3.5, s.z);
     cameraAngle = s.angle; lookTarget.set(s.x, 3.5, s.z); camera.fov = 46; camera.updateProjectionMatrix(); lastTime = 0; perfStart = performance.now(); perfFrames = 0;
     countdown = 3.6; countdownShown = '';
+    // Introduce one hunter as this match's rival while the countdown runs.
+    const rival = world.cars.find(car => car.ai?.hunt);
+    if (rival) { announce(`👀 ${rival.name} ${rival.emoji} está de olho em você`, true); feedbackTime = 3.4; }
     if (sound) initAudio();
     updateHUD(); renderDirty = true;
   }
@@ -359,7 +396,7 @@
   function burst(x, z, count, color, y = .8, electric = false) {
     sparks.emit(x, z, Math.min(count, 12), color, y, electric);
   }
-  const nameOf = id => (id === 0 ? 'VOCÊ' : world.cars[id].name);
+  const nameOf = id => (id === 0 ? 'VOCÊ' : `${world.cars[id].emoji} ${world.cars[id].name}`);
   function feedLine(text) { const line = document.createElement('div'); line.textContent = text; $('feed').prepend(line); while ($('feed').children.length > 5) $('feed').lastChild.remove(); }
   function events() {
     const player = world.cars[0].state;
@@ -375,11 +412,12 @@
         if (event.id === 0) { announce(look.text); if (event.kind !== 'shock') tone(660, .18, .06, { force: true, slide: 1.8 }); }
       }
       if (event.type === 'elimination') {
-        if (event.by === null) feedLine(`${event.id === 0 ? 'VOCÊ' : 'CARRINHO ' + world.cars[event.id].name} caiu ↓`);
+        if (event.by === null) feedLine(`${nameOf(event.id)} caiu sozinho ↓`);
         else feedLine(`${nameOf(event.by)} derrubou ${nameOf(event.id)} 💥`);
+        if (event.id === 0 && event.by) announce(`${nameOf(event.by)}: “${world.cars[event.by].taunt}”`);
         if (event.by === 0 && event.id !== 0) {
           koStreak = world.time - lastKo < 4 ? koStreak + 1 : 1; lastKo = world.time;
-          announce(koStreak >= 3 ? `${koStreak}× KO! IMPARÁVEL!` : koStreak === 2 ? 'DUPLO KO!' : `VOCÊ DERRUBOU ${world.cars[event.id].name}!`);
+          announce(koStreak >= 3 ? `${koStreak}× KO! IMPARÁVEL!` : koStreak === 2 ? 'DUPLO KO!' : `VOCÊ DERRUBOU ${world.cars[event.id].name.toUpperCase()} ${world.cars[event.id].emoji}`);
           jingle(koStreak > 1 ? [660, 880, 1100] : [660, 990]);
         }
         if (event.id === 0) { endTimer = 1.6; killer = event.by; playerTime = world.time; }
@@ -403,7 +441,9 @@
     $('resultTitle').textContent = victory ? 'SOBROU VOCÊ!' : place <= 3 ? 'NO PÓDIO!' : 'FOI POR POUCO.';
     $('position').textContent = '#' + place;
     $('resultText').textContent = victory ? `Vitória no ${theme.name}! ${world.config.bots} adversários ficaram pelo caminho.`
-      : `${place}º de ${total}${killer !== null && killer !== undefined ? ` · derrubado por ${nameOf(killer)}` : ''}. Mais uma batida, mais uma chance.`;
+      : `${place}º de ${total}${killer ? ` · derrubado por ${nameOf(killer)} (${world.cars[killer].style})` : ''}. Mais uma batida, mais uma chance.`;
+    $('taunt').hidden = !killer || victory;
+    if (killer && !victory) $('taunt').textContent = `“${world.cars[killer].taunt}”`;
     $('statKos').textContent = player.kos; $('statTime').textContent = `${Math.round(playerTime)}s`; $('statXp').textContent = `+${xp}`;
     $('resultLevel').textContent = after.level;
     $('resultLevelText').textContent = after.level > before.level ? `SUBIU PARA O NÍVEL ${after.level}!` : `NÍVEL ${after.level} · ${after.into}/${after.need} XP`;
@@ -476,7 +516,11 @@
         const warning = world.warningZone === zone.index;
         zone.group.position.y = warning ? Math.sin(now * 45) * .065 : 0;
         zone.group.rotation.z = warning ? Math.sin(now * 32) * .002 : 0;
-        zone.group.children.forEach(child => { if (child.userData.original) child.material = warning && Math.sin(now * 9) > 0 ? mat('#ff6d56', { emissive: '#ff493a', emissiveIntensity: .35 }) : child.userData.original; });
+        const flash = warning && Math.sin(now * 9) > 0;
+        zone.group.children.forEach(child => {
+          if (child.userData.original) child.material = flash ? mat('#ff6d56', { emissive: '#ff493a', emissiveIntensity: .35 }) : child.userData.original;
+          if (child.userData.overlay) { child.material.color.set(flash ? '#ff8a78' : '#ffffff'); child.material.emissive.copy(flash ? warnGlow : child.userData.emissive); child.material.emissiveIntensity = flash ? .45 : (theme.floor.glowFloor ? .7 : 0); }
+        });
       }
     }
     world.bumpers.forEach((b, i) => { const pulse = Math.max(0, .3 - (world.time - b.hit)) * 2; bumperModels[i].scale.set(1 + pulse, 1 + pulse * 2, 1 + pulse); });
@@ -518,6 +562,8 @@
       for (const hit of cameraRay.intersectObjects(cameraPosts, false)) {
         if (hit.object.isMesh && hit.object.visible) { hit.object.visible = false; cameraObstacles.push(hit.object); }
       }
+      // A ray starting inside a post never hits it, so also clear posts right next to the lens.
+      for (const post of cameraPosts) if (post.visible && Math.hypot(post.position.x - camera.position.x, post.position.z - camera.position.z) < 2.2) { post.visible = false; cameraObstacles.push(post); }
     }
     renderer.render(scene, camera);
     if (perf && ++perfFrames && performance.now() - perfStart >= 1000) {

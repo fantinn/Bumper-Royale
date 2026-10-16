@@ -102,3 +102,19 @@ for (const map of Object.keys(MAPS)) for (const bots of [5, 11, 23]) for (let s 
   longest = Math.max(longest, w.time);
 }
 console.log(`Maps passed: KO credit, pickups, sectors, spin, bumpers, ice and 36 bot matches on ${Object.keys(MAPS).length} maps. Longest: ${longest.toFixed(1)}s.`);
+{
+  // Every bot gets a distinct named personality; hunters go after the player first.
+  const { ROSTER, STYLES } = BumperPhysics;
+  const w = createWorld({ bots: 23 }, seed(9));
+  const names = w.cars.slice(1).map(car => car.name);
+  assert.equal(new Set(names).size, names.length, 'unique bot names');
+  for (const car of w.cars.slice(1)) assert.ok(car.emoji && car.taunt && car.style, `personality for ${car.name}`);
+  assert.equal(new Set(ROSTER.map(bot => bot.name)).size, ROSTER.length, 'roster names unique');
+  for (const bot of ROSTER) assert.ok(STYLES[bot.style], `style ${bot.style}`);
+  const h = createWorld({ bots: 2, pickupInterval: 0 });
+  place(h.cars[0], 0, 0); place(h.cars[1], -6, 0); place(h.cars[2], -9, 0);
+  h.cars[1].ai = { ...STYLES.cacador, nextThink: 0, target: null };
+  BumperAI.update(h);
+  assert.equal(h.cars[1].ai.target, 0, 'hunter picks the player over a closer bot');
+  console.log('Roster passed: 24 named bots with distinct personalities.');
+}

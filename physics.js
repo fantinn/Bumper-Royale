@@ -36,6 +36,41 @@
     doca: { collapse: 'sectors', phases: 6, phaseSeconds: 12, islandRadius: 7, grip: 3.8 }
   };
   const PICKUPS = ['charge', 'heavy', 'shock'];
+  // Bot personalities: traits steer the AI (ai.js); taunts are shown when they knock out the player.
+  const STYLES = {
+    valentao: { label: 'valentão', aggression: .92, caution: .9 },
+    cauteloso: { label: 'cauteloso', aggression: .4, caution: 1.5, massBonus: .12 },
+    turbo: { label: 'turbo', aggression: .8, caution: .8, boost: 1 },
+    coletor: { label: 'caça-itens', aggression: .55, greed: 16 },
+    cacador: { label: 'te persegue', aggression: .85, hunt: 1 },
+    caotico: { label: 'caótico', aggression: .7, chaos: .8 }
+  };
+  const ROSTER = [
+    { name: 'Tia Neide', emoji: '👵', style: 'cauteloso', taunt: 'Vai pro castigo, meu filho!' },
+    { name: 'Zé Turbo', emoji: '🚀', style: 'turbo', taunt: 'Nem vi você aí. Literalmente.' },
+    { name: 'Valdirene', emoji: '💅', style: 'valentao', taunt: 'Quebrei uma unha, mas valeu a pena.' },
+    { name: 'Seu Jorge', emoji: '🧔', style: 'cauteloso', taunt: 'Devagar e sempre, rapaz.' },
+    { name: 'Kevin', emoji: '🧢', style: 'caotico', taunt: 'Foi sem querer... querendo.' },
+    { name: 'Dona Cotinha', emoji: '🧶', style: 'coletor', taunt: 'Obrigada pelo presentinho!' },
+    { name: 'Rogerinho', emoji: '💪', style: 'valentao', taunt: 'Treino de perna em dia!' },
+    { name: 'Peixoto', emoji: '🐟', style: 'caotico', taunt: 'Glub glub. Tchau!' },
+    { name: 'Mestre Kiko', emoji: '🥋', style: 'cacador', taunt: 'O discípulo ainda tem muito a aprender.' },
+    { name: 'Jéssica', emoji: '💄', style: 'turbo', taunt: 'Batom intacto. Você, nem tanto.' },
+    { name: 'Prof. Pardal', emoji: '🤓', style: 'coletor', taunt: 'Calculei o ângulo perfeito.' },
+    { name: 'Gugu', emoji: '🤡', style: 'caotico', taunt: 'Buzina! Bi-bi!' },
+    { name: 'Bebel', emoji: '🎀', style: 'cacador', taunt: 'Eu disse que ia te pegar!' },
+    { name: 'Tonhão', emoji: '🦍', style: 'valentao', taunt: 'UGA! Sai da frente!' },
+    { name: 'Lurdinha', emoji: '🌻', style: 'cauteloso', taunt: 'Ai, desculpa! ...Mentira.' },
+    { name: 'Cabeção', emoji: '🎃', style: 'turbo', taunt: 'Cabeça grande, batida maior.' },
+    { name: 'Biscoito', emoji: '🍪', style: 'coletor', taunt: 'Crec! Esfarelou.' },
+    { name: 'Juninho', emoji: '🛹', style: 'caotico', taunt: 'Manobra radical, mano!' },
+    { name: 'Vovô Zeca', emoji: '👴', style: 'cacador', taunt: 'No meu tempo a gente batia mais forte.' },
+    { name: 'Sheila', emoji: '🔥', style: 'turbo', taunt: 'Tá quente aqui ou é impressão?' },
+    { name: 'Dentinho', emoji: '🦷', style: 'valentao', taunt: 'Sorria! Você caiu.' },
+    { name: 'Marquinhos', emoji: '🎮', style: 'coletor', taunt: 'GG EZ.' },
+    { name: 'Rainha Gil', emoji: '👑', style: 'cacador', taunt: 'Ajoelhou, tem que rezar.' },
+    { name: 'Pipoca', emoji: '🍿', style: 'cauteloso', taunt: 'Pop! Foi você.' }
+  ];
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const massOf = (world, s) => s.mass * (s.heavy > 0 ? world.config.heavyMass : 1);
   // The floor is rotated by world.rotation around the vertical axis (Three.js rotation.y convention).
@@ -78,13 +113,17 @@
     const world = { config, random, time: 0, phase: 0, radius: config.radius, rotation: 0, cars: [], events: [], eliminated: [], status: 'playing', winner: null, warning: false,
       order, dropped: order.map(() => false), warningZone: -1, bumpers: [], pickups: [], nextPickup: config.pickupFirst, pickupId: 0 };
     world.bumpers = config.bumpers.map(b => ({ ...b, zone: zoneAt(world, b.x, b.z), hit: -9 }));
+    // A fresh random lineup every match; extra bots beyond the roster get numbered.
+    const lineup = ROSTER.map(bot => ({ bot, key: random() })).sort((a, b) => a.key - b.key).map(entry => entry.bot);
     for (let i = 0; i <= config.bots; i++) {
       const a = i / (config.bots + 1) * Math.PI * 2;
       const r = config.radius * (i % 2 ? .66 : .77);
-      world.cars.push({ id: i, name: i === 0 ? 'VOCÊ' : String(i).padStart(2, '0'),
+      const bot = i ? lineup[(i - 1) % lineup.length] : null, style = bot ? STYLES[bot.style] : null;
+      const name = !bot ? 'VOCÊ' : i > lineup.length ? `${bot.name} ${Math.ceil(i / lineup.length)}` : bot.name;
+      world.cars.push({ id: i, name, emoji: bot ? bot.emoji : '', style: bot ? style.label : '', taunt: bot ? bot.taunt : '',
         input: { throttle: 0, steer: 0, boost: false },
-        state: { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, angle: a + Math.PI, steering: 0, y: 0, vy: 0, alive: true, cooldown: 0, boostTime: 0, knockback: 0, heavy: 0, kos: 0, lastHit: -1, lastHitTime: -99, mass: config.mass * (i ? .92 + random() * .16 : 1) },
-        ai: i ? { aggression: .3 + random() * .7, nextThink: 0, target: null } : null });
+        state: { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, angle: a + Math.PI, steering: 0, y: 0, vy: 0, alive: true, cooldown: 0, boostTime: 0, knockback: 0, heavy: 0, kos: 0, lastHit: -1, lastHitTime: -99, mass: config.mass * (i ? .92 + random() * .16 + (style.massBonus || 0) : 1) },
+        ai: bot ? { ...style, aggression: Math.min(1, style.aggression + (random() - .5) * .16), nextThink: 0, target: null } : null });
     }
     // On a spinning floor every car starts out riding along with it.
     for (const { state: s } of world.cars) { s.vx = config.spin * s.z; s.vz = -config.spin * s.x; }
@@ -247,5 +286,5 @@
     const alive = world.cars.filter(car => car.state.alive);
     if (alive.length <= 1) { world.status = 'finished'; world.winner = alive[0]?.id ?? null; if (alive[0]) alive[0].state.place = 1; world.events.push({ type: 'finish' }); }
   }
-  root.BumperPhysics = { CONFIG, MAPS, createWorld, step, clamp, massOf, toLocal, toWorld, zoneAt, floorAt, safeAt };
+  root.BumperPhysics = { CONFIG, MAPS, STYLES, ROSTER, createWorld, step, clamp, massOf, toLocal, toWorld, zoneAt, floorAt, safeAt };
 })(globalThis);
